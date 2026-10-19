@@ -186,6 +186,26 @@ namespace se::cs::dialog::data_files_window {
 			SendMessageW(result, WM_SETFONT, SendMessageW(m_List, WM_GETFONT, 0, 0), FALSE);
 			return result;
 		}
+		void applySymbolFont(HWND window) {
+			if (!window) { return; }
+			if (!m_SymbolFont) {
+				auto source = reinterpret_cast<HFONT>(SendMessageW(m_List, WM_GETFONT, 0, 0));
+				LOGFONTW lf = {};
+				if (source && GetObjectW(source, sizeof(lf), &lf) == sizeof(lf)) {
+					lf.lfCharSet = DEFAULT_CHARSET;
+					wcscpy_s(lf.lfFaceName, L"Segoe UI Symbol");
+					m_SymbolFont = CreateFontIndirectW(&lf);
+				}
+				if (!m_SymbolFont) {
+					const auto dc = GetDC(window);
+					const int pixelsY = dc ? GetDeviceCaps(dc, LOGPIXELSY) : 96;
+					if (dc) { ReleaseDC(window, dc); }
+					m_SymbolFont = CreateFontW(-MulDiv(10, pixelsY, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+						DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI Symbol");
+				}
+			}
+			if (m_SymbolFont) { SendMessageW(window, WM_SETFONT, reinterpret_cast<WPARAM>(m_SymbolFont), FALSE); }
+		}
 		void createInterface() {
 			RECT listRect = {}; GetWindowRect(m_List, &listRect); MapWindowPoints(nullptr, m_Window, reinterpret_cast<POINT*>(&listRect), 2);
 			const auto dc = GetDC(m_List);
@@ -215,10 +235,12 @@ namespace se::cs::dialog::data_files_window {
 			SendMessageW(m_Filter, EM_SETLIMITTEXT, 512, 0);
 			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"Clear", ID_CLEAR, listRect.right-clear, top, clear, height);
 			const int row = top+height+gap;
-			const int button = MulDiv(68, dpi, 96), arrow = MulDiv(27, dpi, 96);
-			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"Check", ID_CHECK, left, row, button, height);
-			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"Uncheck", ID_UNCHECK, left+button+gap, row, button, height);
-			int x = left+2*(button+gap);
+			const int check = MulDiv(26, dpi, 96), arrow = MulDiv(27, dpi, 96);
+			const auto checkedBox = control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"☑", ID_CHECK, left, row, check, height);
+			const auto emptyBox = control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"☐", ID_UNCHECK, left+check+gap, row, check, height);
+			applySymbolFont(checkedBox);
+			applySymbolFont(emptyBox);
+			int x = left+2*(check+gap);
 			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"\u2191", ID_UP, x, row, arrow, height); x += arrow+gap;
 			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"\u2193", ID_DOWN, x, row, arrow, height); x += arrow+gap;
 			m_Status = control(SS_CENTERIMAGE | SS_ENDELLIPSIS, L"STATIC", L"", 0, x, row, std::max(1, static_cast<int>(listRect.right)-x), height);
@@ -543,7 +565,9 @@ namespace se::cs::dialog::data_files_window {
 		static LRESULT CALLBACK dialogProc(HWND window, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
 			const auto self = reinterpret_cast<DataFilesController*>(data);
 			if (msg == WM_NCDESTROY) {
-				self->stopDrag(false); RemovePropA(window, CONTROLLER_PROPERTY); RemoveWindowSubclass(window, dialogProc, SUBCLASS_ID);
+				self->stopDrag(false);
+				if (self->m_SymbolFont) { DeleteObject(self->m_SymbolFont); self->m_SymbolFont = nullptr; }
+				RemovePropA(window, CONTROLLER_PROPERTY); RemoveWindowSubclass(window, dialogProc, SUBCLASS_ID);
 				const auto result = DefSubclassProc(window, msg, wp, lp); delete self; return result;
 			}
 			try {
@@ -595,6 +619,7 @@ namespace se::cs::dialog::data_files_window {
 		bool m_GroupFiltering = false, m_Internal = false, m_DependenciesLoaded = false;
 		bool m_Dragging = false, m_DropValid = false;
 		int m_DragLine = -1;
+		HFONT m_SymbolFont = nullptr;
 	};
 
 	static LRESULT CALLBACK afterWindowMessage(int code, WPARAM wp, LPARAM lp) {
