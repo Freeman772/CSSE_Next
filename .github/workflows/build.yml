@@ -26,8 +26,17 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Verify standalone sources
+        run: python scripts/verify.py
+
+      - name: Test load-order rules and rollback
+        run: ./scripts/test-order.ps1
+
       - name: Build CSSE only
         run: ./scripts/build.ps1 -Configuration Release -BuildNumber '${{ github.run_number }}'
+
+      - name: Verify x86 DLL and runtime imports
+        run: python scripts/verify.py --binary build/Release/CSSE.dll
 
       - name: Package DLL, resources and separate symbols
         run: ./scripts/package.ps1 -Configuration Release

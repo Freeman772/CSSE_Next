@@ -3,7 +3,6 @@
 #include "RenderWindowSelectionData.h"
 #include "WindowMain.h"
 #include "DarkMode.h"
-#include "IconOverride.h"
 
 #define IDC_LAYERS_LIST 2001
 #define IDC_BTN_SAVE 2002
@@ -756,11 +755,12 @@ namespace se::cs::dialog::layer_window {
 				&hCurrentModule
 			);
 
-			bool hasAlpha = false;
-			auto hBmp = iconoverride::loadBitmapOverride(hCurrentModule, IDB_TOOLBAR_STRIP, hasAlpha);
-			if (!hBmp) { hBmp = LoadBitmap(hCurrentModule, MAKEINTRESOURCE(IDB_TOOLBAR_STRIP)); }
-			auto hImageList = darkmode::buildImageList(hBmp, 16, 16, 4, 0, hasAlpha, CLR_DEFAULT);
-			DeleteObject(hBmp);
+			HBITMAP hBmp = LoadBitmap(hCurrentModule, MAKEINTRESOURCE(IDB_TOOLBAR_STRIP));
+
+			HIMAGELIST hImageList = ImageList_Create(16, 16, ILC_COLOR24 | ILC_MASK, 3, 0);
+
+			ImageList_AddMasked(hImageList, hBmp, CLR_DEFAULT);
+			DeleteObject(hBmp); 
 
 			HICON hIconSave = ImageList_GetIcon(hImageList, 0, ILD_TRANSPARENT);
 			HICON hIconAdd = ImageList_GetIcon(hImageList, 1, ILD_TRANSPARENT);

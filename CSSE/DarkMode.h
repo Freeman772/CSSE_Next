@@ -19,16 +19,14 @@ namespace se::cs::darkmode {
 	// True when dark mode was successfully activated for this session.
 	bool isActive();
 
-	// Establish v6 controls/image lists for embedded artwork in either theme.
-	bool initializeCommonControls();
-
 	// Resolves the configured theme mode and, if dark, activates comctl32 v6 and
 	// dark window theming. Must be called on the main thread before any CS window
 	// is created.
 	void initialize();
 
 	// Replaces a toolbar's image list with one whose classic silver background is
-	// masked out. Embedded alpha icons are supported in both themes.
+	// masked out, so icons composite correctly over the dark toolbar fill. No-op
+	// when dark mode is inactive.
 	void remapToolbarImages(HWND hWndToolbar, HINSTANCE hImageInstance, UINT bitmapId, int imageWidth, int imageHeight);
 
 	// Builds a comctl32 v6 image list from a single-row strip bitmap (imageCount
