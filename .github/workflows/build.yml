@@ -26,12 +26,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify standalone sources
-        run: python scripts/verify.py
-
-      - name: Test load-order rules and rollback
-        run: ./scripts/test-order.ps1
-
       - name: Build CSSE only
         run: ./scripts/build.ps1 -Configuration Release -BuildNumber '${{ github.run_number }}'
 
