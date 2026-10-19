@@ -186,30 +186,6 @@ namespace se::cs::dialog::data_files_window {
 			SendMessageW(result, WM_SETFONT, SendMessageW(m_List, WM_GETFONT, 0, 0), FALSE);
 			return result;
 		}
-		// Keep the stock checkbox glyphs: the dark-mode subclass already paints
-		// them correctly, with no dependency on a Unicode symbol font.
-		void addCheckTooltips(HWND check, HWND uncheck) {
-			const auto tooltip = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr,
-				WS_POPUP | TTS_NOPREFIX | TTS_ALWAYSTIP, CW_USEDEFAULT, CW_USEDEFAULT,
-				CW_USEDEFAULT, CW_USEDEFAULT, m_Window, nullptr, application.m_hInstance, nullptr);
-			if (!tooltip) { return; } // Cosmetic only, activation must still work.
-			for (const auto& item : { std::pair<HWND, const wchar_t*>{check, L"Enable selected plugins"},
-				std::pair<HWND, const wchar_t*>{uncheck, L"Disable selected plugins"} }) {
-				TOOLINFOW info = {};
-				info.cbSize = sizeof(info);
-				info.uFlags = TTF_IDISHWND | TTF_SUBCLASS;
-				info.hwnd = m_Window;
-				info.uId = reinterpret_cast<UINT_PTR>(item.first);
-				info.lpszText = const_cast<LPWSTR>(item.second);
-				SendMessageW(tooltip, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&info));
-			}
-		}
-		static bool isNativePluginCaption(HWND window) {
-			wchar_t type[32] = {}, caption[64] = {};
-			if (!GetClassNameW(window, type, 32) || _wcsicmp(type, L"Static") != 0) { return false; }
-			GetWindowTextW(window, caption, 64);
-			return _wcsnicmp(caption, L"TES3 Files", 10) == 0;
-		}
 		void createInterface() {
 			RECT listRect = {}; GetWindowRect(m_List, &listRect); MapWindowPoints(nullptr, m_Window, reinterpret_cast<POINT*>(&listRect), 2);
 			const auto dc = GetDC(m_List);
@@ -228,9 +204,6 @@ namespace se::cs::dialog::data_files_window {
 			const int y = std::max(monitor.rcWork.top, std::min(windowRect.top, monitor.rcWork.bottom - (windowRect.bottom - windowRect.top + extra)));
 			SetWindowPos(m_Window, nullptr, windowRect.left, y, windowRect.right-windowRect.left, windowRect.bottom-windowRect.top+extra, SWP_NOZORDER | SWP_NOACTIVATE);
 			for (const auto& child : children) {
-				// The original "TES3 Files" caption would overlap the added
-				// selection controls. The list's column header already labels it.
-				if (isNativePluginCaption(child.window)) { ShowWindow(child.window, SW_HIDE); continue; }
 				SetWindowPos(child.window, nullptr, child.rect.left, child.rect.top+extra, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
 			}
 			const int left = listRect.left, top = listRect.top;
@@ -242,15 +215,10 @@ namespace se::cs::dialog::data_files_window {
 			SendMessageW(m_Filter, EM_SETLIMITTEXT, 512, 0);
 			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"Clear", ID_CLEAR, listRect.right-clear, top, clear, height);
 			const int row = top+height+gap;
-			const int check = MulDiv(26, dpi, 96), arrow = MulDiv(27, dpi, 96);
-			// Manual-state native checkboxes behave as momentary actions; clicking
-			// them never flips the glyph. Existing selection logic stays intact.
-			const auto checkedBox = control(WS_TABSTOP | BS_CHECKBOX, L"BUTTON", L"", ID_CHECK, left, row, check, height);
-			const auto emptyBox = control(WS_TABSTOP | BS_CHECKBOX, L"BUTTON", L"", ID_UNCHECK, left+check+gap, row, check, height);
-			SendMessageW(checkedBox, BM_SETCHECK, BST_CHECKED, 0);
-			SendMessageW(emptyBox, BM_SETCHECK, BST_UNCHECKED, 0);
-			addCheckTooltips(checkedBox, emptyBox);
-			int x = left+2*(check+gap);
+			const int button = MulDiv(68, dpi, 96), arrow = MulDiv(27, dpi, 96);
+			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"Check", ID_CHECK, left, row, button, height);
+			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"Uncheck", ID_UNCHECK, left+button+gap, row, button, height);
+			int x = left+2*(button+gap);
 			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"\u2191", ID_UP, x, row, arrow, height); x += arrow+gap;
 			control(WS_TABSTOP | BS_PUSHBUTTON, L"BUTTON", L"\u2193", ID_DOWN, x, row, arrow, height); x += arrow+gap;
 			m_Status = control(SS_CENTERIMAGE | SS_ENDELLIPSIS, L"STATIC", L"", 0, x, row, std::max(1, static_cast<int>(listRect.right)-x), height);
@@ -575,8 +543,7 @@ namespace se::cs::dialog::data_files_window {
 		static LRESULT CALLBACK dialogProc(HWND window, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR data) {
 			const auto self = reinterpret_cast<DataFilesController*>(data);
 			if (msg == WM_NCDESTROY) {
-				self->stopDrag(false);
-				RemovePropA(window, CONTROLLER_PROPERTY); RemoveWindowSubclass(window, dialogProc, SUBCLASS_ID);
+				self->stopDrag(false); RemovePropA(window, CONTROLLER_PROPERTY); RemoveWindowSubclass(window, dialogProc, SUBCLASS_ID);
 				const auto result = DefSubclassProc(window, msg, wp, lp); delete self; return result;
 			}
 			try {
