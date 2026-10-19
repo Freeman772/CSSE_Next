@@ -1,0 +1,662 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
+      <Extensions>cpp;c;cc;cxx;c++;cppm;ixx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+    <Filter Include="Resource Files">
+      <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
+      <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
+    </Filter>
+    <Filter Include="Header Files\CS">
+      <UniqueIdentifier>{8ac1bb95-78a6-4416-a960-195bd71970bc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\CS">
+      <UniqueIdentifier>{a3c311dc-8df9-4ea2-b9cd-44866c827ffa}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Util">
+      <UniqueIdentifier>{091f2149-c7ea-4a8b-9b9d-67f366f92981}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Util">
+      <UniqueIdentifier>{07b8f8d7-cba4-44ce-9258-c20e53857d15}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\UI">
+      <UniqueIdentifier>{7e124ac6-7f25-474a-ba56-fcaf44439ada}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\UI\Dialog">
+      <UniqueIdentifier>{3f188b73-08d2-41c8-b8eb-ce4d275520c6}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\UI">
+      <UniqueIdentifier>{c3107347-89e3-459b-8d01-ab3d671d747a}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\UI\Dialog">
+      <UniqueIdentifier>{005593a0-f7ef-47c2-be0d-1b5af6f39a66}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\UI\Controllers">
+      <UniqueIdentifier>{426eea90-9e20-4293-9b7c-97ceb28b4a42}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\UI\Controllers">
+      <UniqueIdentifier>{431d0355-2c3b-4033-b5f0-40de48c704f4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\NI">
+      <UniqueIdentifier>{f9bdffe1-0d39-45c0-9896-032b172b4e5b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\UI\ControlClasses">
+      <UniqueIdentifier>{55d26094-df7c-4c07-80a9-2bf8bc2154fd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\UI\ControlClasses">
+      <UniqueIdentifier>{a45cab09-92be-4384-b1ab-65c4bf53ea2d}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\UI\DialogClasses">
+      <UniqueIdentifier>{297cce26-5a28-4344-8824-65127609a17b}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\UI\DialogClasses">
+      <UniqueIdentifier>{e27d27d9-0a04-49a6-a7ba-63ca1d35d1eb}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\Metadata">
+      <UniqueIdentifier>{4449a4dc-e573-49a7-9f26-670871381d55}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\Metadata">
+      <UniqueIdentifier>{e6b55397-019d-43f0-adb3-85987e0df10a}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="CSSE.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+	<ClCompile Include="CrashLoggerCSSE.cpp">
+	  <Filter>Source Files</Filter>
+	</ClCompile>
+    <ClCompile Include="pch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogAboutCSSE.cpp">
+      <Filter>Source Files\UI\DialogClasses</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogCSSESettings.cpp">
+      <Filter>Source Files\UI\DialogClasses</Filter>
+    </ClCompile>
+    <ClCompile Include="CDataBoundPropertyGridProperty.cpp">
+      <Filter>Source Files\UI\ControlClasses</Filter>
+    </ClCompile>
+    <ClCompile Include="CSCell.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSLand.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="PathUtil.cpp">
+      <Filter>Source Files\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogActorAIWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="TextureRenderer.cpp">
+      <Filter>Source Files\UI\Controllers</Filter>
+    </ClCompile>
+    <ClCompile Include="CSGameSetting.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSClass.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSRace.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSFaction.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSBirthsign.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSObject.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="TomlUtil.cpp">
+      <Filter>Source Files\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="MetadataUtil.cpp">
+      <Filter>Source Files\Metadata</Filter>
+    </ClCompile>
+    <ClCompile Include="ModMetadata.cpp">
+      <Filter>Source Files\Metadata</Filter>
+    </ClCompile>
+    <ClCompile Include="CSDialogue.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogProcContext.cpp">
+      <Filter>Source Files\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogUseReportWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogPathGridWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="CSEffect.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSMagicEffect.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSEnchantment.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSAlchemy.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSGlobalVariable.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogLayersWindow.cpp">
+      <Filter>Source Files\UI\DialogClasses</Filter>
+    </ClCompile>
+    <ClCompile Include="DarkMode.cpp">
+      <Filter>Source Files\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="IconOverride.cpp">
+      <Filter>Source Files\UI</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="CSSE.def">
+      <Filter>Source Files</Filter>
+    </None>
+    <None Include="res\comctl32v6.manifest">
+      <Filter>Resource Files</Filter>
+    </None>
+    <None Include="res\CSSE.rc2">
+      <Filter>Resource Files</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="framework.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="targetver.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="CSBaseObject.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSDefines.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSDialogue.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSDialogueInfo.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSGameFile.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSGameSetting.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSLandTexture.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSObject.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSPhysicalObject.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSRecordHandler.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSReference.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSStatic.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogDialogueWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogRenderWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="LogUtil.h">
+      <Filter>Header Files\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogCellWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="WindowMain.h">
+      <Filter>Header Files\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="DarkMode.h">
+      <Filter>Header Files\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="IconOverride.h">
+      <Filter>Header Files\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="CSLight.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSAnimatedObject.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSDataHandler.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSModelLoader.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogSearchAndReplaceWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="Resource.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogDataFilesWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="CSScript.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSCell.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSBook.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="EditBasicExtended.h">
+      <Filter>Header Files\UI\ControlClasses</Filter>
+    </ClInclude>
+    <ClInclude Include="ObjectWindowTabData.h">
+      <Filter>Header Files\UI\Controllers</Filter>
+    </ClInclude>
+    <ClInclude Include="CSLeveledCreature.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSLeveledItem.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSActor.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSCreature.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSEnchantment.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSWeapon.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSSpell.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSEffect.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSApparatus.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSLockpick.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSProbe.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSRepairTool.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSArmor.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSWearablePart.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSLeveledList.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSAIConfig.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSBodyPart.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSClothing.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSContainer.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSFaction.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSIngredient.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSNPC.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSSkill.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSSound.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSSpellList.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="WinUIUtil.h">
+      <Filter>Header Files\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogTextSearchWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderWindowWidgets.h">
+      <Filter>Header Files\UI\Controllers</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderWindowSelectionData.h">
+      <Filter>Header Files\UI\Controllers</Filter>
+    </ClInclude>
+    <ClInclude Include="RenderWindowSceneGraphController.h">
+      <Filter>Header Files\UI\Controllers</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogPreviewWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogReferenceData.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditAlchemyObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditCreatureObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditLeveledCreatureObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditEnchantmentObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditLeveledItemObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditNPCObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogEditSpellObjectWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogScriptListWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogScriptEditorWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogLandscapeEditSettingsWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="CSSE.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="pch.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="Settings.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogAboutCSSE.h">
+      <Filter>Header Files\UI\DialogClasses</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogCSSESettings.h">
+      <Filter>Header Files\UI\DialogClasses</Filter>
+    </ClInclude>
+    <ClInclude Include="CDataBoundPropertyGridProperty.h">
+      <Filter>Header Files\UI\ControlClasses</Filter>
+    </ClInclude>
+    <ClInclude Include="CSArchive.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="PathUtil.h">
+      <Filter>Header Files\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogActorAIWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="CSRegion.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="TextureRenderer.h">
+      <Filter>Header Files\UI\Controllers</Filter>
+    </ClInclude>
+    <ClInclude Include="CSClass.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSRace.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSBirthsign.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="TomlUtil.h">
+      <Filter>Header Files\Util</Filter>
+    </ClInclude>
+    <ClInclude Include="ModMetadata.h">
+      <Filter>Header Files\Metadata</Filter>
+    </ClInclude>
+    <ClInclude Include="MetadataUtil.h">
+      <Filter>Header Files\Metadata</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogProcContext.h">
+      <Filter>Header Files\UI</Filter>
+    </ClInclude>
+    <ClInclude Include="CSDoor.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogUseReportWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="CSGlobalVariable.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogPathGridWindow.h">
+      <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="CSMagicEffect.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSAlchemy.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSLand.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="CSFile.h">
+      <Filter>Header Files\CS</Filter>
+    </ClInclude>
+    <ClInclude Include="DialogLayersWindow.h">
+      <Filter>Header Files\UI\DialogClasses</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="pch.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="CSBaseObject.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogDialogueWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogRenderWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="LogUtil.cpp">
+      <Filter>Source Files\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="CSPhysicalObject.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSReference.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSLight.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSDataHandler.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogCellWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="WindowMain.cpp">
+      <Filter>Source Files\UI</Filter>
+    </ClCompile>
+    <ClCompile Include="CSModelLoader.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogSearchAndReplaceWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="Settings.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogDataFilesWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="CSRecordHandler.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSGameFile.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSScript.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="EditBasicExtended.cpp">
+      <Filter>Source Files\UI\ControlClasses</Filter>
+    </ClCompile>
+    <ClCompile Include="ObjectWindowTabData.cpp">
+      <Filter>Source Files\UI\Controllers</Filter>
+    </ClCompile>
+    <ClCompile Include="CSLeveledCreature.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSLeveledItem.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSArmor.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSBodyPart.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSBook.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSContainer.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSCreature.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSIngredient.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSNPC.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSWeapon.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSSpell.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="CSSE.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WinUIUtil.cpp">
+      <Filter>Source Files\Util</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogTextSearchWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="CSDialogueInfo.cpp">
+      <Filter>Source Files\CS</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderWindowWidgets.cpp">
+      <Filter>Source Files\UI\Controllers</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderWindowSelectionData.cpp">
+      <Filter>Source Files\UI\Controllers</Filter>
+    </ClCompile>
+    <ClCompile Include="RenderWindowSceneGraphController.cpp">
+      <Filter>Source Files\UI\Controllers</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogPreviewWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogReferenceData.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditAlchemyObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditCreatureObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditLeveledCreatureObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditEnchantmentObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditLeveledItemObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditNPCObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogEditSpellObjectWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogScriptListWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogScriptEditorWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+    <ClCompile Include="DialogLandscapeEditSettingsWindow.cpp">
+      <Filter>Source Files\UI\Dialog</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="CSSE.rc">
+      <Filter>Resource Files</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="main_toolbar.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+    <Image Include="layer_toolbar.bmp">
+      <Filter>Resource Files</Filter>
+    </Image>
+  </ItemGroup>
+</Project>

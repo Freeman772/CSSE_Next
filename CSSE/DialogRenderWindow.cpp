@@ -1,0 +1,3809 @@
+#include "DialogRenderWindow.h"
+
+#include "LogUtil.h"
+#include "MathUtil.h"
+#include "MemoryUtil.h"
+#include "StringUtil.h"
+#include "WindowsUtil.h"
+
+#include "NIAVObject.h"
+#include "NIBound.h"
+#include "NICamera.h"
+#include "NICollisionSwitch.h"
+#include "NIGeometry.h"
+#include "NIMatrix33.h"
+#include "NINode.h"
+#include "NIPoint3.h"
+#include "NIPick.h"
+#include "NILines.h"
+#include "NITriShape.h"
+#include "NIProperty.h"
+
+#include "CSCell.h"
+#include "CSDataHandler.h"
+#include "CSDoor.h"
+#include "CSGameFile.h"
+#include "CSLandTexture.h"
+#include "CSRecordHandler.h"
+#include "CSReference.h"
+#include "CSStatic.h"
+#include "CSLand.h"
+
+#include "RenderWindowSceneGraphController.h"
+#include "RenderWindowSelectionData.h"
+#include "RenderWindowWidgets.h"
+#include "Settings.h"
+#include "DarkMode.h"
+
+#include "DialogLandscapeEditSettingsWindow.h"
+#include "DialogLayersWindow.h"
+#include "WindowMain.h"
+
+#include "DialogProcContext.h"
+
+namespace se::cs::dialog::render_window {
+	__int16 lastCursorPosX = 0;
+	__int16 lastCursorPosY = 0;
+
+	namespace lw = se::cs::dialog::layer_window;
+
+	std::default_random_engine generator;
+	std::uniform_real_distribution<float> rotationDistribution(0.0, 360.0);
+	std::uniform_real_distribution<float> scaleDistribution(0.5, 2.0);
+
+	using gRenderWindowHandle = memory::ExternalGlobal<HWND, 0x6CE93C>;
+
+	using gObjectMove = memory::ExternalGlobal<float, 0x6CE9B4>;
+	using gObjectRotate = memory::ExternalGlobal<float, 0x6CE9B0>;
+
+	using gCameraPan = memory::ExternalGlobal<float, 0x6CE9C0>;
+	using gCameraRotate = memory::ExternalGlobal<float, 0x6CE9B8>;
+	using gCameraZoom = memory::ExternalGlobal<float, 0x6CE9BC>;
+
+	using gSnapGrid = memory::ExternalGlobal<int, 0x6CE9A8>;
+	using gSnapAngleInDegrees = memory::ExternalGlobal<int, 0x6CE9AC>;
+	using gCumulativeRotationValues = memory::ExternalGlobal<NI::Point3, 0x6CF760>;
+	using gPreviousCumulativeRotationValues = memory::ExternalGlobal<NI::Point3, 0x6CF4A8>;
+
+	using gRenderWindowPick = memory::ExternalGlobal<NI::Pick, 0x6CF528>;
+
+	using gIsTranslating = memory::ExternalGlobal<bool, 0x6CF782>;
+	using gIsRotating = memory::ExternalGlobal<bool, 0x6CF783>;
+	using gIsHoldingV = memory::ExternalGlobal<bool, 0x6CF789>;
+	using gIsHoldingX = memory::ExternalGlobal<bool, 0x6CF786>;
+	using gIsHoldingY = memory::ExternalGlobal<bool, 0x6CF787>;
+	using gIsHoldingZ = memory::ExternalGlobal<bool, 0x6CF788>;
+	using gIsScaling = memory::ExternalGlobal<bool, 0x6CF785>;
+	using gIsPanning = memory::ExternalGlobal<bool, 0x6CF78A>;
+
+	using gIsReferencePicking = memory::ExternalGlobal<bool, 0x6CF790>;
+	using gIsPathGridEditing = memory::ExternalGlobal<bool, 0x6CF791>;
+	using gIsPreviewMode = memory::ExternalGlobal<bool, 0x6CF797>;
+
+	void renderNextFrame() {
+		using gRenderNextFrame = memory::ExternalGlobal<bool, 0x6CF78D>;
+		gRenderNextFrame::set(true);
+	}
+
+	using gLandscapeEditDisc = memory::ExternalGlobal<NI::Lines*, 0x6CF4B4>;
+	using gLandscapeEditRadius = memory::ExternalGlobal<int, 0x6CE9CC>;
+	using gCurrentLandData = memory::ExternalGlobal<Land*, 0x6CF7AC>;
+	using gSelectedLandTexture = memory::ExternalGlobal<LandTexture*, 0x6CE9D4>;
+
+	constexpr float LANDSCAPE_BRUSH_SAMPLE_STEP = 128.0f;
+	constexpr int LAND_TEXTURE_TILES_PER_SIDE = 16;
+	constexpr unsigned short LAND_DEFAULT_TEXTURE_INDEX = 0xFFFF;
+
+	struct TexturePaintTileInfo {
+		float landLocalX; // 0x0
+		float landLocalY; // 0x4
+		float blockLocalX; // 0x8
+		float blockLocalY; // 0xC
+		int blockX; // 0x10
+		int blockY; // 0x14
+		int blockIndex; // 0x18
+		float quadLocalX; // 0x1C
+		float quadLocalY; // 0x20
+		int quadX; // 0x24
+		int quadY; // 0x28
+		int textureTileIndex; // 0x2C
+		NI::Point3 closestVertexWorldPosition; // 0x30
+		int closestVertexIndex; // 0x3C
+		int triangleVertexIndices[3]; // 0x40
+		BYTE triangleFlags[2]; // 0x4C
+		BYTE padding_0x4E[2];
+	};
+	static_assert(sizeof(TexturePaintTileInfo) == 0x50, "TexturePaintTileInfo failed size validation");
+	static_assert(offsetof(TexturePaintTileInfo, blockIndex) == 0x18, "TexturePaintTileInfo::blockIndex failed offset validation");
+	static_assert(offsetof(TexturePaintTileInfo, textureTileIndex) == 0x2C, "TexturePaintTileInfo::textureTileIndex failed offset validation");
+	static_assert(offsetof(TexturePaintTileInfo, closestVertexWorldPosition) == 0x30, "TexturePaintTileInfo::closestVertexWorldPosition failed offset validation");
+	static_assert(offsetof(TexturePaintTileInfo, triangleFlags) == 0x4C, "TexturePaintTileInfo::triangleFlags failed offset validation");
+
+	struct TexturePaintTileKey {
+		Land* land = nullptr;
+		int gridX = 0;
+		int gridY = 0;
+		int blockIndex = 0;
+		int textureTileIndex = 0;
+
+		bool operator==(const TexturePaintTileKey& rhs) const {
+			return land == rhs.land
+				&& gridX == rhs.gridX
+				&& gridY == rhs.gridY
+				&& blockIndex == rhs.blockIndex
+				&& textureTileIndex == rhs.textureTileIndex;
+		}
+	};
+
+	struct TexturePaintTileKeyHasher {
+		std::size_t operator()(const TexturePaintTileKey& key) const {
+			auto hash = std::hash<Land*>{}(key.land);
+
+			hash ^= std::hash<int>{}(key.gridX) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			hash ^= std::hash<int>{}(key.gridY) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			hash ^= std::hash<int>{}(key.blockIndex) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+			hash ^= std::hash<int>{}(key.textureTileIndex) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+
+			return hash;
+		}
+	};
+
+	struct TexturePaintTarget {
+		TexturePaintTileKey key;
+		TexturePaintTileInfo tileInfo;
+	};
+
+	struct TexturePaintDragState {
+		LandTexture* lastSelectedTexture = nullptr;
+		int lastRadius = 0;
+		std::unordered_set<TexturePaintTileKey, TexturePaintTileKeyHasher> paintedTiles;
+
+		TexturePaintDragState() {
+			paintedTiles.reserve(256);
+		}
+
+		void reset() {
+			lastSelectedTexture = nullptr;
+			lastRadius = 0;
+			paintedTiles.clear();
+		}
+
+		void sync(LandTexture* selectedTexture, int radius) {
+			if (lastSelectedTexture == selectedTexture && lastRadius == radius) {
+				return;
+			}
+
+			reset();
+			lastSelectedTexture = selectedTexture;
+			lastRadius = radius;
+		}
+	};
+
+	TexturePaintDragState texturePaintDragState;
+
+	using LandWorldPosToGridAndLandDataFn = bool(__thiscall*)(DataHandler*, NI::Point3*, LandTexture**);
+	using LandWorldPosToTileInfoFn = bool(__thiscall*)(Land*, TexturePaintTileInfo*, NI::Point3*, bool);
+	using LandApplyTextureByWorldPosFn = void(__thiscall*)(Land*, NI::Point3*);
+	using LandApplyTextureToTileFn = bool(__thiscall*)(Land*, TexturePaintTileInfo*);
+
+	bool isLandscapeTexturePaintModeActive() {
+		using landscape_edit_settings_window::getEditLandscapeColor;
+		using landscape_edit_settings_window::getFlattenLandscapeVertices;
+		using landscape_edit_settings_window::getLandscapeEditingEnabled;
+		using landscape_edit_settings_window::getSoftenLandscapeVertices;
+
+		return getLandscapeEditingEnabled()
+			&& !getEditLandscapeColor()
+			&& !getFlattenLandscapeVertices()
+			&& !getSoftenLandscapeVertices();
+	}
+
+	bool isValidTexturePaintTileInfo(const TexturePaintTileInfo& tileInfo) {
+		const auto blockIndex = tileInfo.blockIndex;
+		const auto textureTileIndex = tileInfo.textureTileIndex;
+
+		return blockIndex >= 0
+			&& blockIndex < LAND_TEXTURE_TILES_PER_SIDE
+			&& textureTileIndex >= 0
+			&& textureTileIndex < LAND_TEXTURE_TILES_PER_SIDE;
+	}
+
+	bool getTexturePaintTarget(
+		NI::Point3& worldPos,
+		LandWorldPosToGridAndLandDataFn worldPosToGridAndLandData,
+		LandWorldPosToTileInfoFn worldPosToTileInfo,
+		TexturePaintTarget& target
+	) {
+		LandTexture* currentTexture = nullptr;
+		if (!worldPosToGridAndLandData(DataHandler::get(), &worldPos, &currentTexture)) {
+			return false;
+		}
+
+		const auto land = gCurrentLandData::get();
+		if (land == nullptr) {
+			return false;
+		}
+
+		TexturePaintTileInfo tileInfo;
+		if (!worldPosToTileInfo(land, &tileInfo, &worldPos, true)) {
+			return false;
+		}
+
+		if (land->sceneNode == nullptr) {
+			return false;
+		}
+
+		// Match Land::applyTextureByWorldPos: snap once, then resolve again from the texture tile center.
+		NI::Point3 tileCenter;
+		tileCenter.x = (static_cast<float>(static_cast<int>(tileInfo.landLocalX * 0.001953125f)) * 512.0f)
+			+ 256.0f
+			+ land->sceneNode->localTranslate.x;
+		tileCenter.y = (static_cast<float>(static_cast<int>(tileInfo.landLocalY * 0.001953125f)) * 512.0f)
+			+ 256.0f
+			+ land->sceneNode->localTranslate.y;
+		tileCenter.z = worldPos.z;
+
+		if (!worldPosToTileInfo(land, &tileInfo, &tileCenter, true)) {
+			return false;
+		}
+
+		if (!isValidTexturePaintTileInfo(tileInfo)) {
+			return false;
+		}
+
+		target.key.land = land;
+		target.key.gridX = land->gridX;
+		target.key.gridY = land->gridY;
+		target.key.blockIndex = tileInfo.blockIndex;
+		target.key.textureTileIndex = tileInfo.textureTileIndex;
+		target.tileInfo = tileInfo;
+		return true;
+	}
+
+	bool texturePaintTargetMatchesExpectedTexture(const TexturePaintTileKey& key, unsigned short expectedTextureIndex) {
+		return key.land->textureIndices[key.blockIndex][key.textureTileIndex] == expectedTextureIndex;
+	}
+
+	void resetTexturePaintDragState() {
+		texturePaintDragState.reset();
+	}
+
+	void updateLandscapeCircleWidget() {
+		const auto widget = gLandscapeEditDisc::get();
+		if (!widget) {
+			return;
+		}
+
+		const auto vertexColorProp = widget->getVertexColorProperty();
+		if (!vertexColorProp) {
+			return;
+		}
+
+		NI::PackedColor color = settings.landscape_window.edit_circle_vertex;
+		if (landscape_edit_settings_window::getFlattenLandscapeVertices()) {
+			color = settings.landscape_window.edit_circle_flatten_vertex;
+		}
+		else if (landscape_edit_settings_window::getSoftenLandscapeVertices()) {
+			color = settings.landscape_window.edit_circle_soften_vertex;
+		}
+		else if (landscape_edit_settings_window::getEditLandscapeColor()) {
+			color = settings.landscape_window.edit_circle_color_vertex;
+		}
+
+		const auto modelData = widget->getModelData();
+		for (auto i = 0u; i < modelData->getActiveVertexCount(); ++i) {
+			modelData->color[i] = color;
+		}
+
+		renderNextFrame();
+	}
+
+	namespace RenderControlFlags {
+		enum RenderControlFlags : DWORD {
+			SnapToGrid = 0x1,
+			SnapToAngle = 0x2,
+			AllowRenderWindowCellLoads = 0x4,
+			SkipInitialCellLoad = 0x10,
+		};
+	}
+	using gRenderControlFlags = memory::ExternalGlobal<DWORD, 0x6CE9A4>;
+	using gAutoSaveTime = memory::ExternalGlobal<int, 0x6CEA38>;
+
+	const auto resetCumulativeRotationValues = reinterpret_cast<void(__stdcall*)()>(0x466470);
+
+	// Convenience function to see if X, Y, or Z are held down.
+	bool isHoldingAxisKey() {
+		return gIsHoldingX::get() || gIsHoldingY::get() || gIsHoldingZ::get();
+	}
+
+	bool isGridSnapping() {
+		return gRenderControlFlags::get() & RenderControlFlags::SnapToGrid;
+	}
+
+	bool isAngleSnapping() {
+		return gRenderControlFlags::get() & RenderControlFlags::SnapToAngle;
+	}
+
+	bool isModifyingObject() {
+		return gIsTranslating::get() || gIsRotating::get() || gIsScaling::get();
+	}
+
+	struct NetImmerseInstance {
+		struct VirtualTable {
+			void* dtor; // 0x0
+			void* setRegistryKey; // 0x4
+			void* setWindowWidth; // 0x8
+			void* setWindowHeight; // 0xC
+			void* setBitDepth; // 0x10
+			void* setBackBuffers; // 0x14
+			void* setMultisampleEnable; // 0x18
+			void* setMultisamples; // 0x1C
+			void* setFullScreen; // 0x20
+			void(__thiscall* setPixelShaderEnabled)(NetImmerseInstance*, bool); // 0x24
+			void* setStencil; // 0x28
+			void* setMipmap; // 0x2C
+			void* setMipmapSkipLevel; // 0x30
+			void* setHardwareTL; // 0x34
+			void* setMultipass; // 0x38
+			void* setVertexProcessing; // 0x3C
+			void* setSwapEffect; // 0x40
+			void* setRefreshRate; // 0x44
+			void* setPresentInterval; // 0x48
+			void* setAdapterID; // 0x4C
+			void(__thiscall* setGamma)(NetImmerseInstance*, float); // 0x50
+			void* readSettings; // 0x54
+			void* writeSettings; // 0x58
+			void* createRenderer; // 0x5C
+			void* createRendererFromSettings; // 0x60
+		};
+		VirtualTable* vTable; // 0x0
+		const char* ownerString; // 0x4
+		int windowWidth; // 0x8
+		int windowHeight; // 0xC
+		int screenDepth; // 0x10
+		int backBuffers; // 0x14
+		int multiSamples; // 0x18
+		bool fullscreen; // 0x1C
+		bool stencil; // 0x1D
+		bool mipmap; // 0x1E
+		bool hardware; // 0x1F
+		bool pixelShader; // 0x20
+		bool multiPass; // 0x21
+		bool screenShotsEnabled; // 0x22
+		int vertexProcessing; // 0x24
+		int swapEffect; // 0x28
+		int refreshRate; // 0x2C
+		int adapter; // 0x30
+		int mipmapSkipLevel; // 0x34
+		int presentationInterval; // 0x38
+		float gamma; // 0x3C
+		NI::Point3 unknown_0x40;
+		NI::Pointer<NI::Node> node; // 0x4C
+		NI::Renderer* renderer; // 0x50
+		int unknown_0x54;
+		HWND parentWindow; // 0x58
+		int unknown_0x5C;
+		int unknown_0x60;
+	};
+	static_assert(sizeof(NetImmerseInstance) == 0x64, "CS::NetImmerseInstance failed size validation");
+	static_assert(sizeof(NetImmerseInstance::VirtualTable) == 0x64, "CS::NetImmerseInstance's virtual table failed size validation");
+
+
+	//
+	// Patch: Improve camera controls.
+	//
+
+	enum class CameraChangeType : unsigned int {
+		PanX,
+		PanY,
+		PanZ,
+		SetPositionX,
+		SetPositionY,
+		SetPositionZ,
+		Unknown6,
+		Unknown7,
+		Unknown8,
+		Unknown9,
+		Unknown10,
+		Unknown11,
+	};
+
+	float getHoveredSurfaceDistance() {
+		auto camera = RenderController::get()->camera;
+
+		NI::Point3 origin;
+		NI::Point3 direction;
+		if (!camera->windowPointToRay(lastCursorPosX, lastCursorPosY, origin, direction)) {
+			return 0.0;
+		}
+
+		NI::Point3 intersection;
+		float zDistObject = 0.0f;
+		float zDistLandscape = 0.0f;
+
+		auto objectPick = SceneGraphController::get()->objectPick;
+		if (objectPick->pickObjectsWithSkinDeforms(&origin, &direction)) {
+			intersection = objectPick->results[0]->intersection;
+			zDistObject = (intersection - origin).dotProduct(&camera->worldDirection);
+		}
+
+		auto landscapePick = SceneGraphController::get()->landscapePick;
+		if (landscapePick->pickObjects(&origin, &direction)) {
+			intersection = landscapePick->results[0]->intersection;
+			zDistLandscape = (intersection - origin).dotProduct(&camera->worldDirection);
+		}
+		
+		if (zDistObject == 0.0f && zDistLandscape == 0.0f) {
+			return 0.0;
+		}
+
+		if (zDistObject != 0.0f && zDistLandscape != 0.0f) {
+			return std::fmin(zDistObject, zDistLandscape);
+		}
+		else {
+			return std::fmax(zDistObject, zDistLandscape);
+		}
+	}
+
+	struct CameraPanContext {
+		POINT initialCursorPosition;
+		NI::Point3 initialPosition;
+		NI::Point3 panDDX;
+		NI::Point3 panDDY;
+
+		bool setup() {
+			auto camera = RenderController::get()->camera;
+
+			// Store the initial cursor/camera position when entering panning mode.
+			if (!GetCursorPos(&initialCursorPosition)) {
+				return false;
+			}
+			initialPosition = camera->worldTransform.translation;
+
+			// Get distance of the surface currently under the cursor.
+			// Be sure to use a safe fallback value if nothing is under the cursor.
+			float zDist = getHoveredSurfaceDistance();
+			zDist = (zDist != 0.0f) ? zDist : 2048.0f;
+
+			// Do some forward differencing to get the changes relative to mouse coord changes.
+			panDDX = camera->worldRight * (2.0f * zDist * camera->viewFrustum.right / camera->renderer->getBackBufferWidth());
+			panDDY = camera->worldUp * (-2.0f * zDist * camera->viewFrustum.top / camera->renderer->getBackBufferHeight());
+
+			return true;
+		}
+	};
+	static auto cameraPanContext = CameraPanContext();
+
+	void __stdcall Patch_ImproveCameraControls_EnterPanningMode() {
+		if (gIsPanning::get() == true) {
+			return;
+		}
+		
+		bool useLegacyCamera = settings.render_window.use_legacy_camera;
+		if (!useLegacyCamera) {
+			auto success = cameraPanContext.setup();
+			if (!success) {
+				return;
+			}
+		}
+
+		gIsPanning::set(true);
+	}
+
+	constexpr DWORD Patch_ImproveCameraControls_EnterPanningMode_Wrapper_ReturnAddress = 0x45E32A;
+	__declspec(naked) void Patch_ImproveCameraControls_EnterPanningMode_Wrapper() {
+		__asm {
+			pushad
+			call Patch_ImproveCameraControls_EnterPanningMode
+			popad
+			jmp Patch_ImproveCameraControls_EnterPanningMode_Wrapper_ReturnAddress
+		}
+	}
+
+	bool __cdecl Patch_ImproveCameraControls(NI::Node* cameraNode, CameraChangeType changeType, float changeValue) {
+		bool useLegacyCamera = settings.render_window.use_legacy_camera;
+		if (!useLegacyCamera) {
+			if (changeType == CameraChangeType::PanX || changeType == CameraChangeType::PanZ) {
+				auto& context = cameraPanContext;
+
+				POINT cursorPos = {};
+				if (!GetCursorPos(&cursorPos)) {
+					return false;
+				}
+
+				// Calculate the vector from initial mouse position to current.
+				NI::Point3 difference = (
+					context.panDDX * (float)(cursorPos.x - context.initialCursorPosition.x) +
+					context.panDDY * (float)(cursorPos.y - context.initialCursorPosition.y)
+				);
+
+				// Apply camera movement.
+				cameraNode->localTranslate = context.initialPosition - difference;
+
+				return true;
+			}
+		}
+
+		// Fall back to original logic.
+		const auto CS_HandleCameraChange = reinterpret_cast<bool(__cdecl*)(NI::Node*, CameraChangeType, float)>(0x469C50);
+		return CS_HandleCameraChange(cameraNode, changeType, changeValue);
+	}
+
+	//
+	// Patch: Use world rotation values unless ALT is held.
+	//
+
+	const auto TES3_CS_OriginalRotationLogic = reinterpret_cast<bool(__cdecl*)(void*, SelectionData::Target*, int, SelectionData::RotationAxis)>(0x4652D0);
+	bool __cdecl Patch_ReplaceRotationLogic(void* unknown1, SelectionData::Target* firstTarget, int relativeMouseDelta, SelectionData::RotationAxis rotationAxis) {
+		using windows::isKeyDown;
+		using windows::isControlDown;
+
+		// Allow holding ALT modifier to do vanilla behavior.
+		bool useWorldAxisRotation = settings.render_window.use_world_axis_rotations_by_default;
+		if (isKeyDown(VK_MENU)) {
+			useWorldAxisRotation = !useWorldAxisRotation;
+		}
+
+		if (!useWorldAxisRotation) {
+			return TES3_CS_OriginalRotationLogic(unknown1, firstTarget, relativeMouseDelta, rotationAxis);
+		}
+
+		if (relativeMouseDelta == 0) {
+			return false;
+		}
+
+		auto selectionData = SelectionData::get();
+
+		if (!isKeyDown('X') && !isKeyDown('Y')) {
+			rotationAxis = SelectionData::RotationAxis::Z;
+		}
+
+		auto widgets = SceneGraphController::get()->getWidgets();
+		if (isHoldingAxisKey()) {
+			widgets->setPosition(selectionData->bound.center);
+			widgets->show();
+		}
+
+		const auto rotationSpeed = gObjectRotate::get();
+		auto& cumulativeRot = gCumulativeRotationValues::get();
+
+		// Treat cumulativeRot as rotation vector (axis * angle)
+		// Add delta rotation along the chosen world axis
+		const float deltaAngle = relativeMouseDelta * rotationSpeed * 0.1f;
+		switch (rotationAxis) {
+		case SelectionData::RotationAxis::X:
+			widgets->setAxis(WidgetsAxis::X);
+			cumulativeRot.x += deltaAngle;
+			break;
+		case SelectionData::RotationAxis::Y:
+			widgets->setAxis(WidgetsAxis::Y);
+			cumulativeRot.y += deltaAngle;
+			break;
+		case SelectionData::RotationAxis::Z:
+			widgets->setAxis(WidgetsAxis::Z);
+			cumulativeRot.z += deltaAngle;
+			break;
+		}
+
+		const auto snapAngle = math::degreesToRadians((float)gSnapAngleInDegrees::get());
+		const bool isSnapping = (isControlDown() || isAngleSnapping()) && (snapAngle != 0.0f);
+
+		// Treat cumulativeRot as rotation vector (axis * angle)
+		float rawAngle = cumulativeRot.length();
+		NI::Point3 axis(0.0f, 0.0f, 1.0f);  // Default to Z axis
+
+		if (rawAngle > 0.0001f) {
+			axis = cumulativeRot / rawAngle;
+		}
+
+		// Snap the angle magnitude, not individual components
+		float snappedAngle = rawAngle;
+		if (isSnapping && rawAngle > 0.0001f) {
+			snappedAngle = std::roundf(rawAngle / snapAngle) * snapAngle;
+		}
+
+		// Early exit if no rotation to apply
+		if (snappedAngle < 0.0001f) {
+			return 0;
+		}
+
+		// Subtract the applied rotation from accumulator (preserve remainder for smooth feedback)
+		cumulativeRot = axis * (rawAngle - snappedAngle);
+
+		// Build rotation directly from axis-angle (NO Euler roundtrip!)
+		NI::Matrix33 userRotation;
+		userRotation.toRotation(snappedAngle, axis);
+
+		for (auto target = selectionData->firstTarget; target; target = target->next) {
+			auto reference = target->reference;
+
+			reference->setAsEdited();
+
+			// Disallow XY rotations on actors and northmarkers.
+			auto doRotations = true;
+			if (rotationAxis != SelectionData::RotationAxis::Z && !reference->baseObject->canRotateOnAllAxes()) {
+				doRotations = false;
+			}
+
+			if (doRotations) {
+				auto& oldRotation = *reference->sceneNode->localRotation;
+				auto newRotation = userRotation * oldRotation;
+
+				// Extract Euler angles for reference orientation storage.
+				NI::Point3 orientation;
+				{
+					orientation.y = asin(-newRotation.m0.z);
+					if (cos(orientation.y) != 0) {
+						orientation.x = atan2(newRotation.m1.z, newRotation.m2.z);
+						orientation.z = atan2(newRotation.m0.y, newRotation.m0.x);
+					}
+					else {
+						orientation.x = atan2(newRotation.m2.x, newRotation.m2.y);
+						orientation.z = 0;
+					};
+				}
+
+				math::standardizeAngleRadians(orientation.x);
+				math::standardizeAngleRadians(orientation.y);
+				math::standardizeAngleRadians(orientation.z);
+
+				reference->yetAnotherOrientation = orientation;
+				reference->orientationNonAttached = orientation;
+
+				NI::Matrix33 referenceHandledRotations;
+				reference->updateRotationMatrixForRaceAndSex(referenceHandledRotations);
+				reference->sceneNode->setLocalRotationMatrix(&referenceHandledRotations);
+			}
+
+			// Rotate positions.
+			if (selectionData->numberOfTargets > 1) {
+				auto p = reference->position - selectionData->bound.center;
+				reference->position = (userRotation * p) + selectionData->bound.center;
+				reference->unknown_0x10 = reference->position;
+				reference->sceneNode->localTranslate = reference->position;
+
+				// Avoid lighting updates when moving large number of targets.
+				if (selectionData->numberOfTargets <= 20) {
+					DataHandler::get()->updateLightingForReference(reference);
+				}
+			}
+
+			reference->sceneNode->update(0.0f, true, true);
+		}
+
+		return true;
+	}
+
+	//
+	// Patch: Improve multi-reference scaling.
+	//
+
+	static auto selectionNeedsScaleUpdate = false;
+	void __cdecl Patch_ReplaceScalingLogic(RenderController* renderController, SelectionData::Target* firstTarget, int mouseDelta) {
+		using windows::isKeyDown;
+
+		auto selectionData = SelectionData::get();
+		bool useGroupScaling = settings.render_window.use_group_scaling;
+		if (!useGroupScaling || selectionData->numberOfTargets == 1) {
+			const auto VanillaScalingHandler = reinterpret_cast<void(__cdecl*)(RenderController*, SelectionData::Target*, int)>(0x404949);
+			VanillaScalingHandler(renderController, firstTarget, mouseDelta);
+			return;
+		}
+
+		// Clamp such that no reference will be scaled beyond supported bounds. [0.5, 2.0]
+		auto delta = mouseDelta * 0.01f;
+		for (auto target = firstTarget; target; target = target->next) {
+			const auto scale = target->reference->sceneNode->localScale;
+			delta = std::clamp(delta, 0.5f - scale, 2.0f - scale);
+		}
+		if (fabs(delta) < 0.01) {
+			return;
+		}
+		
+		// Avoid using `setScale` every update, its implementation causes huge precision loss.
+		// Instead set this flag which will trigger `setScale` just once when finished scaling.
+		selectionNeedsScaleUpdate = true;
+
+		// Scale all selected references and their positions relative to last target.
+		const auto center = selectionData->getLastTarget()->reference->position;
+		const auto factor = 1.0f + delta;
+
+		for (auto target = firstTarget; target; target = target->next) {
+			auto reference = target->reference;
+
+			// Update scale.
+			reference->sceneNode->localScale *= factor;
+
+			// Update position.
+			const auto relativePosition = reference->position - center;
+			reference->position = center + (relativePosition * factor);
+
+			reference->unknown_0x10 = reference->position;
+			reference->sceneNode->localTranslate = reference->position;
+			reference->sceneNode->update(0.0f, true, true);
+
+			// Avoid lighting updates when moving large number of targets.
+			if (selectionData->numberOfTargets <= 20) {
+				DataHandler::get()->updateLightingForReference(reference);
+			}
+
+			reference->setAsEdited();
+		}
+
+		selectionData->recalculateBound();
+	}
+
+	//
+	// Patch: Fix drop-to-surface (F)
+	//
+
+	float __cdecl Patch_FixDropToSurface_GetLowestZ(NI::Node* node) {
+		// Force update deforms.
+		node->updateWorldDeforms();
+
+		// Overwritten code.
+		return node->getLowestVertexZ();
+	}
+
+	void __cdecl Patch_FixDropToSurface_GetLowVertices(const NI::AVObject* object, float nearToZ) {
+		constexpr auto NEAR_THRESHOLD = 1.0f;
+		const auto gNearVertexArray = *reinterpret_cast<NI::TArray<NI::Point3*>**>(0x6CF7C4);
+
+		auto processChild = [&](const NI::AVObject* child) {
+			if (!child) {
+				return;
+			}
+
+			// Calculate for geometry.
+			if (child->isInstanceOfType(NI::RTTIStaticPtr::NiTriBasedGeom)) {
+				auto asGeometry = static_cast<const NI::Geometry*>(child);
+
+				// Ignore particles.
+				if (asGeometry->isInstanceOfType(NI::RTTIStaticPtr::NiParticles)) {
+					return;
+				}
+
+				// Add nearby vertices.
+				for (auto i = 0u; i < asGeometry->modelData->vertexCount; ++i) {
+					const auto vertex = &asGeometry->worldVertices[i];
+					if (std::abs(vertex->z - nearToZ) <= NEAR_THRESHOLD) {
+						gNearVertexArray->push_back(vertex);
+					}
+				}
+
+				return;
+			}
+
+			// Recursively call for child nodes.
+			if (child->isInstanceOfType(NI::RTTIStaticPtr::NiNode)) {
+				Patch_FixDropToSurface_GetLowVertices(child, nearToZ);
+				return;
+			}
+		};
+
+		// For NiSwitchNode, only process the active child. 
+		// The "UpdateOnlyActive" flag prevents updates on inactive children.
+		if (object->isInstanceOfType(NI::RTTIStaticPtr::NiSwitchNode)) {
+			const auto asSwitchNode = static_cast<const NI::SwitchNode*>(object);
+			const auto child = asSwitchNode->getActiveChild();
+			processChild(child);
+			return;
+		}
+
+		if (object->isInstanceOfType(NI::RTTIStaticPtr::NiNode)) {
+			const auto asNode = static_cast<const NI::Node*>(object);
+			for (const auto& child : asNode->children) {
+				processChild(child);
+			}
+			return;
+		}
+	}
+
+	bool __fastcall Patch_FixDropToSurface_PickObjects(NI::Pick* pick, DWORD _EDX_, NI::Point3* origin, NI::Point3* direction, bool append, float maxDistance) {
+		// Perform pick with skin deforms instead.
+		return pick->pickObjectsWithSkinDeforms(origin, direction, append, maxDistance);
+	}
+
+	//
+	// Patch: Improve moving objects.
+	//
+
+	//
+	// Patch: Allow alt-dragging objects to snap to surfaces.
+	//
+	enum class SnappingAxis {
+		POSITIVE_X,
+		NEGATIVE_X,
+		POSITIVE_Y,
+		NEGATIVE_Y,
+		POSITIVE_Z,
+		NEGATIVE_Z,
+	};
+
+	SnappingAxis snappingAxis = SnappingAxis::POSITIVE_Z;
+
+	int Patch_AlignToSurfaceDragMovementLogic(RenderController* renderController, SelectionData::Target* firstTarget, int dx, int dy, bool lockX, bool lockY, bool lockZ) {
+		// Currently requires a single selection.
+		auto selectionData = SelectionData::get();
+		if (selectionData->numberOfTargets != 1) {
+			return 0;
+		}
+
+		auto rendererPicker = &gRenderWindowPick::get();
+		auto rendererController = RenderController::get();
+		auto sceneGraphController = SceneGraphController::get();
+
+		// Cache picker settings we care about.
+		const auto& previousRoot = rendererPicker->root;
+		const auto previousReturnNormal = rendererPicker->returnNormal;
+		const auto previousPickType = rendererPicker->pickType;
+
+		// Make changes to the pick that we need to.
+		rendererPicker->root = sceneGraphController->sceneRoot;
+		rendererPicker->returnNormal = true;
+		rendererPicker->pickType = NI::PickType::FIND_ALL;
+
+		auto reference = selectionData->firstTarget->reference;
+		reference->sceneNode->setAppCulled(true);
+
+		NI::Point3 origin;
+		NI::Point3 direction;
+		if (rendererController->camera->windowPointToRay(lastCursorPosX, lastCursorPosY, origin, direction)) {
+			direction.normalize();
+
+			if (rendererPicker->pickObjects(&origin, &direction)) {
+				auto firstResult = rendererPicker->getFirstUnskinnedResult();
+				if (firstResult) {
+					auto object = reference->baseObject;
+
+					auto refSnappingAxis = snappingAxis;
+					if (!object->canRotateOnAllAxes()) {
+						refSnappingAxis = SnappingAxis::POSITIVE_Z;
+					}
+
+					reference->setAsEdited();
+
+					// Set position.
+					NI::Point3 offset;
+					const auto scale = reference->getScale();
+					switch (refSnappingAxis) {
+					case SnappingAxis::POSITIVE_X:
+						offset = firstResult->normal * std::abs(object->boundingBox.minimum.x) * scale;
+						break;
+					case SnappingAxis::NEGATIVE_X:
+						offset = firstResult->normal * std::abs(object->boundingBox.maximum.x) * scale;
+						break;
+					case SnappingAxis::POSITIVE_Y:
+						offset = firstResult->normal * std::abs(object->boundingBox.minimum.y) * scale;
+						break;
+					case SnappingAxis::NEGATIVE_Y:
+						offset = firstResult->normal * std::abs(object->boundingBox.maximum.y) * scale;
+						break;
+					case SnappingAxis::POSITIVE_Z:
+						offset = firstResult->normal * std::abs(object->boundingBox.minimum.z) * scale;
+						break;
+					case SnappingAxis::NEGATIVE_Z:
+						offset = firstResult->normal * std::abs(object->boundingBox.maximum.z) * scale;
+						break;
+					}
+
+					reference->position = firstResult->intersection + offset;
+					reference->unknown_0x10 = reference->position;
+					reference->sceneNode->localTranslate = reference->position;
+
+					selectionData->bound.center = reference->position;
+
+					// Set rotation.
+					if (object->canRotateOnAllAxes()) {
+						NI::Point3 orientation;
+						switch (refSnappingAxis) {
+						case SnappingAxis::POSITIVE_X:
+						case SnappingAxis::NEGATIVE_X:
+							orientation.x = 1.0f;
+							break;
+						case SnappingAxis::POSITIVE_Y:
+						case SnappingAxis::NEGATIVE_Y:
+							orientation.y = 1.0f;
+							break;
+						case SnappingAxis::POSITIVE_Z:
+						case SnappingAxis::NEGATIVE_Z:
+							orientation.z = 1.0f;
+							break;
+						}
+
+						NI::Matrix33 rotation;
+						rotation.toRotationDifference(orientation, firstResult->normal);
+
+						// Flip axis if it's negative snapping.
+						NI::Matrix33 flipMatrix;
+						switch (refSnappingAxis) {
+						case SnappingAxis::NEGATIVE_X:
+							flipMatrix.toRotationY(std::numbers::pi_v<float>);
+							break;
+						case SnappingAxis::NEGATIVE_Y:
+							flipMatrix.toRotationZ(std::numbers::pi_v<float>);
+							break;
+						case SnappingAxis::NEGATIVE_Z:
+							flipMatrix.toRotationX(std::numbers::pi_v<float>);
+							break;
+						default:
+							flipMatrix.toIdentity();
+						}
+						rotation = rotation * flipMatrix;
+						rotation.toEulerXYZ(&orientation);
+
+						// Restore the original Z orientation.
+						switch (refSnappingAxis) {
+						case SnappingAxis::POSITIVE_Z:
+						case SnappingAxis::NEGATIVE_Z:
+							orientation.z = reference->yetAnotherOrientation.z;
+							rotation.fromEulerXYZ(orientation.x, orientation.y, orientation.z);
+							break;
+						}
+						
+						math::standardizeAngleRadians(orientation.x);
+						math::standardizeAngleRadians(orientation.y);
+						math::standardizeAngleRadians(orientation.z);
+
+						reference->yetAnotherOrientation = orientation;
+						reference->orientationNonAttached = orientation;
+
+						reference->sceneNode->setLocalRotationMatrix(&rotation);
+					}
+					
+					reference->sceneNode->update(0.0f, true, true);
+
+					// Update lighting data.
+					DataHandler::get()->updateLightingForReference(reference);
+				}
+			}
+		}
+
+		reference->sceneNode->setAppCulled(false);
+
+		// Restore pick settings.
+		rendererPicker->clearResults();
+		rendererPicker->root = previousRoot;
+		rendererPicker->returnNormal = previousReturnNormal;
+		rendererPicker->pickType = previousPickType;
+		
+		return 1;
+	}
+
+	struct MovementContext {
+		NI::Point3 basePosition;
+		NI::Point3 cursorOffset;
+	};
+	static auto movementContext = std::optional<MovementContext>();
+
+	const auto DefaultDragMovementFunction = reinterpret_cast<int(__cdecl*)(RenderController*, SelectionData::Target*, int, int, bool, bool, bool)>(0x464B70);
+	int __cdecl Patch_ReplaceDragMovementLogic(RenderController* renderController, SelectionData::Target* firstTarget, int dx, int dy, bool lockX, bool lockY, bool lockZ) {
+		using windows::isKeyDown;
+		using windows::isControlDown;
+
+		auto selectionData = SelectionData::get();
+		auto lastTarget = selectionData->getLastTarget();
+		if (!lastTarget) {
+			return 0;
+		}
+
+		// Respect the "Use Legacy Object Movement" setting.
+		if (settings.render_window.use_legacy_object_movement) {
+			return DefaultDragMovementFunction(renderController, firstTarget, dx, dy, lockX, lockY, lockZ);
+		}
+
+		// Don't dirty the reference when nothing has changed.
+		if (dx == 0 && dy == 0) {
+			return 0;
+		}
+
+		// When holding alt perform align-to-surface behavior.
+		// Disallow while control is down (grid snap enabled).
+		if (isKeyDown(VK_MENU) && !isControlDown()) {
+			return Patch_AlignToSurfaceDragMovementLogic(renderController, firstTarget, dx, dy, lockX, lockY, lockZ);
+		}
+
+		// Calculate raycast origin/direction from cursor.
+		NI::Point3 rayOrigin;
+		NI::Point3 rayDirection;
+		auto camera = RenderController::get()->camera;
+		if (!camera->windowPointToRay(lastCursorPosX, lastCursorPosY, rayOrigin, rayDirection)) {
+			return 0;
+		}
+
+		// Ensure selection center is correct. Currently some other functions don't update it. (F key)
+		selectionData->recalculateCenter();
+		
+		// Calculate the plane that we will raycast against.
+		auto planeOrigin = selectionData->bound.center;
+		auto planeNormal = NI::Point3(0, 0, 1);
+
+		// Preserve the cursor offset and starting position.
+		if (!movementContext.has_value()) {
+			MovementContext context;
+			auto pick = SceneGraphController::get()->objectPick;
+			if (pick->pickObjectsWithSkinDeforms(&rayOrigin, &rayDirection)) {
+				const auto hit = pick->results.at(0)->intersection;
+				// Account for racial scaling distorting NiPick's local-space ray transformation.
+				const auto distanceAlongRay = (hit - rayOrigin).dotProduct(&rayDirection);
+				context.basePosition = rayOrigin + rayDirection * distanceAlongRay;
+				context.cursorOffset = context.basePosition - planeOrigin;
+			}
+			else {
+				context.basePosition = planeOrigin;
+				context.cursorOffset = NI::Point3();
+			}
+			movementContext = std::move(context);
+		}
+		auto& context = movementContext.value();
+		planeOrigin = planeOrigin + context.cursorOffset;
+
+		// Align the plane to the locked axis if applicable.
+		auto widgets = SceneGraphController::get()->getWidgets();
+		bool isAxisLocked = lockX || lockY || lockZ;
+		if (isAxisLocked) {
+			planeNormal = camera->worldDirection;
+			if (lockX) {
+				planeNormal.x = 0.0f;
+				widgets->setAxis(WidgetsAxis::X);
+			}
+			if (lockY) {
+				planeNormal.y = 0.0f;
+				widgets->setAxis(WidgetsAxis::Y);
+			}
+			if (lockZ) {
+				planeNormal.z = 0.0f;
+				widgets->setAxis(WidgetsAxis::Z);
+			}
+			planeNormal.normalize();
+			widgets->show();
+		}
+
+		// Clamp the plane angle if we're close to parellel with the camera.
+		auto fixedNormal = planeNormal;
+		auto fixedOrigin = planeOrigin;
+		if (!isAxisLocked) {
+			auto direction = (context.basePosition - camera->worldTransform.translation);
+			direction.normalize();
+
+			const float angle = planeNormal.dotProduct(&direction);
+			const float minAngle = se::math::degreesToRadians(15);
+			if (fabs(angle) <= minAngle) {
+				// Clamping to `minAngle` about the camera X axis.
+				NI::Matrix33 m;
+				m.toRotation(angle < 0.0f ? -minAngle : minAngle, camera->worldRight);
+				fixedNormal = m * planeNormal;
+				fixedOrigin = context.basePosition;
+			}
+		}
+
+		// Calculate the intersection.
+		auto [distance, intersection] = math::rayPlaneIntersection(rayOrigin, rayDirection, fixedOrigin, fixedNormal);
+		if (distance == -1.0f) {
+			return 0;
+		}
+
+		// Apply axis restrictions.
+		if (!isAxisLocked) {
+			intersection.z = planeOrigin.z;
+		}
+		else if (lockX) {
+			intersection.y = planeOrigin.y;
+			intersection.z = planeOrigin.z;
+		}
+		else if (lockY) {
+			intersection.x = planeOrigin.x;
+			intersection.z = planeOrigin.z;
+		}
+		else if (lockZ) {
+			intersection.x = planeOrigin.x;
+			intersection.y = planeOrigin.y;
+		}
+
+		// Apply grid snap.
+		if (isGridSnapping() || isControlDown()) {
+			auto increment = gSnapGrid::get();
+			if (increment != 0.0f) {
+				// "Unlocked" movement defaults to XY axis.
+				auto lockXY = !isAxisLocked;
+				// Legacy grid snap also locks the Z axis by default.
+				auto legacyLockZ = !isAxisLocked && settings.render_window.use_legacy_grid_snap;
+				// Offset so the last reference will be on the grid.
+				auto p = intersection + (lastTarget->reference->position - planeOrigin);
+				if (lockX || lockXY) {
+					intersection.x -= p.x - (std::roundf(p.x / increment) * increment);
+				}
+				if (lockY || lockXY) {
+					intersection.y -= p.y - (std::roundf(p.y / increment) * increment);
+				}
+				if (lockZ || legacyLockZ) {
+					intersection.z -= p.z - (std::roundf(p.z / increment) * increment);
+				}
+			}
+		}
+
+		// Update positions.
+		for (auto target = selectionData->firstTarget; target; target = target->next) {
+			auto reference = target->reference;
+			reference->position = intersection + (reference->position - planeOrigin);
+			reference->unknown_0x10 = reference->position;
+			if (reference->sceneNode) {
+				reference->sceneNode->localTranslate = reference->position;
+				reference->sceneNode->update(0.0f, true, true);
+			}
+
+			// Avoid lighting updates when moving large number of targets.
+			if (selectionData->numberOfTargets <= 20) {
+				DataHandler::get()->updateLightingForReference(reference);
+			}
+
+			reference->setAsEdited();
+		}
+
+		selectionData->recalculateCenter();
+		widgets->setPosition(lastTarget->reference->position);
+
+		return 0;
+	}
+
+	static bool IsReferenceHidden(Reference* reference) {
+		auto nodeLayer = lw::getLayerByObject(reference);
+		return nodeLayer ? nodeLayer->isLayerHidden : false;
+	}
+
+	bool __stdcall CheckNodeHasHiddenFlag(NI::Node* node) {
+		if (!node) return false;
+		Reference* reference = node->getTes3Reference(false);
+		auto nodeLayer = lw::getLayerByObject(reference);
+		return nodeLayer ? nodeLayer->isLayerHidden : false;
+	}
+
+	void __fastcall Patch_SelectionBoxCheckReference(SelectionData* self, DWORD _EDX_, Reference* reference, bool updateVisuals) {
+		// Skip hidden references.
+		if (IsReferenceHidden(reference)) {
+			return;
+		}
+
+		// Call overwritten code.
+		self->addReference(reference, updateVisuals);
+	}
+
+	//
+	// Patch: Make clicking things near skinned objects not painful.
+	//
+
+	Reference* __cdecl Patch_FixPickAgainstSkinnedObjects(SceneGraphController* sgController, RenderController* renderController, int screenX, int screenY) {
+		NI::Point3 origin;
+		NI::Point3 direction;
+		if (!renderController->camera->windowPointToRay(screenX, screenY, origin, direction)) {
+			return nullptr;
+		}
+
+		if (!sgController->objectPick->pickObjectsWithSkinDeforms(&origin, &direction)) {
+			return nullptr;
+		}
+
+		Reference* closestRef = nullptr;
+		auto closestDistance = std::numeric_limits<float>::max();
+
+		for (auto& result : sgController->objectPick->results) {
+			if (result == nullptr || result->object == nullptr) {
+				continue;
+			}
+
+			// Raycast should ignore hidden objects.
+			if (CheckNodeHasHiddenFlag(result->object->parentNode)) {
+				continue;
+			}
+
+			if (result->distance < closestDistance) {
+				closestRef = result->object->getTes3Reference(true);
+				closestDistance = result->distance;
+			}
+		}
+
+		return closestRef;
+	}
+
+	//
+	// Patch: Allow custom FOV.
+	//
+
+	bool __fastcall Patch_AllowCustomFOV(NetImmerseInstance* self, DWORD _EDX_, NI::Camera* camera, int width, int height, float renderDistance) {
+		auto& frustum = camera->viewFrustum;
+		frustum.setFOV(settings.render_window.fov, float(height) / float(width));
+		frustum.near = std::clamp(renderDistance / 10000.0f, 0.1f, 12.0f);
+		frustum.far = renderDistance;
+
+		camera->port = { 0.0f, 1.0f, 1.0f, 0.0f };
+
+		camera->scene = self->node;
+		camera->update();
+
+		return true;
+	}
+
+	//
+	// Patch: Allow antialiasing in the render window
+	//
+
+	byte __fastcall Patch_AllowCustomMultisamples(void* self, DWORD _edx_, unsigned int a2, unsigned int a3, char a4, int multiSamples, int a6, unsigned int a7, unsigned int a8, int a9, unsigned int a10, int a11) {
+		multiSamples = settings.render_window.multisamples;
+
+		auto fn = reinterpret_cast<byte(__thiscall*)(void*, unsigned int, unsigned int, char, int, int, unsigned int, unsigned int, int, unsigned int, int)>(0x58ECC0);
+		return fn(self, a2, a3, a4, multiSamples, a6, a7, a8, a9, a10, a11);
+	}
+
+	//
+	// Fix camera positioning around objects with too high of a bound radius.
+	//
+
+	NI::Node* __fastcall Patch_LimitCameraOrbitRadius(Reference* reference) {
+		// Force an update call. This fixes world bounds...
+		auto node = reference->sceneNode;
+		node->update();
+
+		// Overwritten code.
+		return node;
+	}
+
+	//
+	// Patch: Allow custom markers to be toggled.
+	//
+
+	void SetCullOnTriEditorMarkers(NI::AVObject* object, bool cull) {
+		if (object->isInstanceOfType(NI::RTTIStaticPtr::NiNode)) {
+			for (auto& child : static_cast<NI::Node*>(object)->children) {
+				if (child) {
+					SetCullOnTriEditorMarkers(child, cull);
+				}
+			}
+		}
+		else if (object->name) {
+			if (_strnicmp(object->name, "Tri EditorMarker", 16) == 0) {
+				object->setAppCulled(cull);
+			}
+		}
+	}
+
+	void __fastcall PatchEditorMarkers(Reference* reference, bool cull) {
+		if (reference->sceneNode == nullptr) {
+			return;
+		}
+
+		if (reference->isMarker()) {
+			reference->sceneNode->setAppCulled(cull);
+		}
+		else if (reference->sceneNode->hasStringDataWithValue("MRK")) {
+			SetCullOnTriEditorMarkers(reference->sceneNode, cull);
+
+			auto editorMarker = reference->sceneNode->getObjectByName("EditorMarker");
+			if (editorMarker) {
+				editorMarker->setAppCulled(cull);
+			}
+		}
+	}
+
+	__declspec(naked) void PatchEditorMarkers_Setup() {
+		__asm {
+			mov edx, [esp + 0x18 + 0x4]
+		}
+	}
+	constexpr auto PatchEditorMarkers_Setup_Size = 0x4u;
+
+	//
+	// Patch: When hiding objects (Shift+C) in terrain editing mode (H), do not hide the terrain editing circle.
+	//
+
+	void __fastcall PatchAddBlankTexturingProperty(NI::LinkedList<NI::Property*>* properties, DWORD _EDX_, NI::Property* prop) {
+		const auto avObject = memory::getMainStructureFromOffset<NI::AVObject>(properties, offsetof(NI::AVObject, propertyNode));
+		
+		// Add existing property.
+		avObject->attachProperty(prop);
+
+		// Add an empty texturing property.
+		auto texturingProp = new NI::TexturingProperty();
+		avObject->attachProperty(texturingProp);
+	}
+
+	void __fastcall PatchFixMaterialPropertyColors(NI::LinkedList<NI::Property*>* properties, DWORD _EDX_, NI::MaterialProperty* prop) {
+		const auto color = NI::Color(1.0f, 0.0f, 0.0f);
+		prop->ambient = color;
+		prop->diffuse = color;
+		prop->specular = color;
+		prop->emissive = color;
+
+		const auto avObject = memory::getMainStructureFromOffset<NI::AVObject>(properties, offsetof(NI::AVObject, propertyNode));
+		avObject->attachProperty(prop);
+	}
+
+	//
+	// Patch: Prevent selecting hidden references.
+	//
+
+	static void __fastcall PatchPreventSelection(SelectionData* self, DWORD _EDX, Reference* reference, bool flag) {
+
+		// Skip soft-hidden objects.
+		auto nodeLayer = lw::getLayerByObject(reference);
+		if (nodeLayer ? nodeLayer->isLayerHidden : false) {
+			return;
+		}
+		self->addReference(reference, flag);
+	}
+
+	//
+	// Patch: Extend reference status data
+	//
+
+	const auto TES3CS_UpdateStatusMessage = reinterpret_cast<void(__cdecl*)(WPARAM, const char*)>(0x404881);
+
+	void __cdecl Patch_ExtendReferenceStatusData(WPARAM wParam, const char* lParam) {
+		const auto cell = gCurrentCell::get();
+		const auto firstTarget = SelectionData::get()->firstTarget;
+		if (firstTarget == nullptr || cell == nullptr) {
+			TES3CS_UpdateStatusMessage(wParam, lParam);
+			return;
+		}
+
+		const auto reference = firstTarget->reference;
+
+		std::stringstream ss;
+		ss << std::dec << std::fixed << std::setprecision(0)
+			<< reference->position.x << ", " << reference->position.y << ", " << reference->position.z
+			<< " [" << math::radiansToDegrees(reference->orientationNonAttached.x) << ", " << math::radiansToDegrees(reference->orientationNonAttached.y) << ", " << math::radiansToDegrees(reference->orientationNonAttached.z) << "]"
+			<< " " << std::setprecision(2) << reference->getScale()
+			<< " " << cell->getEditorId();
+		
+		TES3CS_UpdateStatusMessage(wParam, ss.str().c_str());
+	}
+
+	//
+	// Patch: Extend Render Window message handling.
+	//
+
+	Land* getActiveExteriorLandForMesh(NI::Node* node) {
+		const auto dataHandler = DataHandler::get();
+		for (auto x = 0; x < 5; ++x) {
+			for (auto y = 0; y < 5; ++y) {
+				const auto exteriorData = dataHandler->exteriorCellData[x][y];
+				if (exteriorData == nullptr) {
+					continue;
+				}
+
+				auto land = exteriorData->cell->getLand();
+				if (land == nullptr) {
+					continue;
+				}
+
+				for (auto b = 0; b < 16; ++b) {
+					if (!land->blockCreated[b]) {
+						continue;
+					}
+
+					if (land->blockTextures[b] == node) {
+						return land;
+					}
+				}
+			}
+		}
+
+		return nullptr;
+	}
+
+	LandTexture* getLandscapeTextureUnderCursor() {
+		auto rendererController = RenderController::get();
+		auto sceneGraphController = SceneGraphController::get();
+
+		NI::Point3 origin;
+		NI::Point3 direction;
+		if (!rendererController->camera->windowPointToRay(lastCursorPosX, lastCursorPosY, origin, direction)) {
+			return nullptr;
+		}
+
+		const auto pick = sceneGraphController->landscapePick;
+		if (!pick->pickObjects(&origin, &direction)) {
+			return nullptr;
+		}
+
+		const auto firstResult = pick->results.at(0);
+		if (firstResult == nullptr || firstResult->object == nullptr) {
+			return nullptr;
+		}
+
+		const auto texturingProperty = firstResult->object->getTexturingProperty();
+		if (texturingProperty == nullptr) {
+			return nullptr;
+		}
+
+		const auto baseMap = texturingProperty->getBaseMap();
+		if (baseMap == nullptr) {
+			return nullptr;
+		}
+
+		const auto land = getActiveExteriorLandForMesh(firstResult->object->parentNode);
+		if (land == nullptr) {
+			return nullptr;
+		}
+
+		const auto landTextures = DataHandler::get()->recordHandler->landTextures;
+		const auto& texture = baseMap->texture;
+		for (auto x = 0; x < 16; ++x) {
+			for (auto y = 0; y < 16; ++y) {
+				const auto index = land->textureIndices[x][y];
+				auto landTexture = landTextures->at(index);
+				if (landTexture == nullptr) {
+					continue;
+				}
+
+				if (landTexture->texture == texture) {
+					return landTexture;
+				}
+			}
+		}
+
+		return nullptr;
+	}
+
+	bool PickLandscapeTexture(HWND hWnd) {
+		using landscape_edit_settings_window::getLandscapeEditingEnabled;
+		using landscape_edit_settings_window::getEditLandscapeColor;
+		using landscape_edit_settings_window::setSelectTexture;
+		using gLandscapeEditWindowHandle = landscape_edit_settings_window::gWindowHandle;
+
+		auto editorWindow = gLandscapeEditWindowHandle::get();
+		if (!editorWindow) {
+			return false;
+		}
+
+		// Make sure we're in landscape editing mode.
+		if (!getLandscapeEditingEnabled()) {
+			return false;
+		}
+
+		// Make sure we aren't in landscape color edit mode.
+		if (getEditLandscapeColor()) {
+			return false;
+		}
+
+		auto texture = getLandscapeTextureUnderCursor();
+		if (!texture) {
+			return false;
+		}
+
+		return setSelectTexture(texture);
+	}
+
+	bool __fastcall Patch_ResolveTexturePaintTarget(DataHandler* dataHandler, DWORD _EDX_, NI::Point3* worldPos, LandTexture** currentTexture) {
+		const auto Land__worldPosToGridAndLandData = reinterpret_cast<bool(__thiscall*)(DataHandler*, NI::Point3*, LandTexture**)>(0x4A46C0);
+
+		const auto result = Land__worldPosToGridAndLandData(dataHandler, worldPos, currentTexture);
+		if (settings.landscape_window.radius_aware_texture_painting_enabled && gLandscapeEditRadius::get() > 1) {
+			*currentTexture = nullptr;
+		}
+
+		return result;
+	}
+
+	void __fastcall Patch_ApplyTextureWithRadius(Land* land, DWORD _EDX_, NI::Point3* worldPos) {
+		const auto Land__worldPosToGridAndLandData = reinterpret_cast<LandWorldPosToGridAndLandDataFn>(0x4A46C0);
+		const auto Land__worldPosToTileInfo = reinterpret_cast<LandWorldPosToTileInfoFn>(0x511A20);
+		const auto Land__applyTextureByWorldPos = reinterpret_cast<LandApplyTextureByWorldPosFn>(0x5191F0);
+		const auto Land__applyTextureToTile = reinterpret_cast<LandApplyTextureToTileFn>(0x519300);
+		const auto radius = gLandscapeEditRadius::get();
+
+		if (!settings.landscape_window.radius_aware_texture_painting_enabled || radius <= 1) {
+			resetTexturePaintDragState();
+			Land__applyTextureByWorldPos(land, worldPos);
+			return;
+		}
+
+		const auto selectedTexture = gSelectedLandTexture::get();
+		const auto activeDragCache = isLandscapeTexturePaintModeActive() && selectedTexture != nullptr;
+		if (!activeDragCache) {
+			resetTexturePaintDragState();
+		}
+		else {
+			texturePaintDragState.sync(selectedTexture, radius);
+		}
+
+		const auto extent = float(radius) * LANDSCAPE_BRUSH_SAMPLE_STEP;
+		const auto extentSquared = extent * extent;
+		const auto centerX = worldPos->x;
+		const auto centerY = worldPos->y;
+		const auto expectedTextureIndex = selectedTexture ? static_cast<unsigned short>(selectedTexture->index) : LAND_DEFAULT_TEXTURE_INDEX;
+		auto& dragState = texturePaintDragState;
+		std::unordered_set<TexturePaintTileKey, TexturePaintTileKeyHasher> stampTiles;
+		std::vector<TexturePaintTarget> targets;
+
+		stampTiles.reserve(256);
+		targets.reserve(256);
+
+		for (auto y = centerY - extent; y < centerY + extent; y += LANDSCAPE_BRUSH_SAMPLE_STEP) {
+			for (auto x = centerX - extent; x < centerX + extent; x += LANDSCAPE_BRUSH_SAMPLE_STEP) {
+				const auto dx = centerX - x;
+				const auto dy = centerY - y;
+				if (dx * dx + dy * dy > extentSquared) {
+					continue;
+				}
+
+				NI::Point3 tilePosition;
+				tilePosition.x = x;
+				tilePosition.y = y;
+				tilePosition.z = worldPos->z;
+
+				TexturePaintTarget target;
+				if (!getTexturePaintTarget(tilePosition, Land__worldPosToGridAndLandData, Land__worldPosToTileInfo, target)) {
+					continue;
+				}
+
+				if (!stampTiles.insert(target.key).second) {
+					continue;
+				}
+
+				if (texturePaintTargetMatchesExpectedTexture(target.key, expectedTextureIndex)) {
+					if (activeDragCache) {
+						dragState.paintedTiles.insert(target.key);
+					}
+					continue;
+				}
+
+				// The drag cache is only a hint; direct land data always wins.
+				if (activeDragCache) {
+					dragState.paintedTiles.erase(target.key);
+				}
+
+				targets.push_back(target);
+			}
+		}
+
+		for (const auto& target : targets) {
+			if (texturePaintTargetMatchesExpectedTexture(target.key, expectedTextureIndex)) {
+				if (activeDragCache) {
+					dragState.paintedTiles.insert(target.key);
+				}
+				continue;
+			}
+
+			auto tileInfo = target.tileInfo;
+			if (Land__applyTextureToTile(target.key.land, &tileInfo)
+				&& activeDragCache
+				&& texturePaintTargetMatchesExpectedTexture(target.key, expectedTextureIndex)) {
+				dragState.paintedTiles.insert(target.key);
+			}
+		}
+
+		LandTexture* currentTexture = nullptr;
+		Land__worldPosToGridAndLandData(DataHandler::get(), worldPos, &currentTexture);
+	}
+
+	//
+	// Patch: Iterative vertex color painting with strength + blend modes.
+	//
+
+	enum class VertexColorBlendMode {
+		Mix,
+		Darken,
+		Lighten,
+		Multiply,
+		Screen,
+		Add,
+		Subtract,
+	};
+
+	VertexColorBlendMode getConfiguredBlendMode() {
+		const auto& name = settings.landscape_window.vertex_color_blend_mode;
+		if (name == "Darken") return VertexColorBlendMode::Darken;
+		if (name == "Lighten") return VertexColorBlendMode::Lighten;
+		if (name == "Multiply") return VertexColorBlendMode::Multiply;
+		if (name == "Screen") return VertexColorBlendMode::Screen;
+		if (name == "Add") return VertexColorBlendMode::Add;
+		if (name == "Subtract") return VertexColorBlendMode::Subtract;
+		return VertexColorBlendMode::Mix;
+	}
+
+	unsigned char blendChannel(unsigned char current, unsigned char paint, VertexColorBlendMode mode) {
+		int result;
+		switch (mode) {
+		case VertexColorBlendMode::Darken:
+			result = std::min<int>(current, paint);
+			break;
+		case VertexColorBlendMode::Lighten:
+			result = std::max<int>(current, paint);
+			break;
+		case VertexColorBlendMode::Multiply:
+			result = (int(current) * int(paint)) / 255;
+			break;
+		case VertexColorBlendMode::Screen:
+			result = 255 - ((255 - int(current)) * (255 - int(paint))) / 255;
+			break;
+		case VertexColorBlendMode::Add:
+			result = int(current) + int(paint);
+			break;
+		case VertexColorBlendMode::Subtract:
+			result = int(current) - int(paint);
+			break;
+		case VertexColorBlendMode::Mix:
+		default:
+			result = paint;
+			break;
+		}
+		return static_cast<unsigned char>(std::clamp(result, 0, 255));
+	}
+
+	using gPaintLandModifiedFlag = memory::ExternalGlobal<int, 0x6CE938>;
+
+	bool __fastcall Patch_PaintVertexColors(Land* land, DWORD _EDX_, NI::Point3* worldPos, NI::PackedColor* paintColor) {
+		if (land == nullptr) {
+			return false;
+		}
+
+		LandTileInfo centerInfo;
+		if (!land->worldPosToTileInfo(&centerInfo, worldPos, true)) {
+			return false;
+		}
+
+		const auto strength = std::clamp(settings.landscape_window.vertex_color_strength, 0, 100) / 100.0f;
+		const auto blendMode = getConfiguredBlendMode();
+
+		const auto radius = float(gLandscapeEditRadius::get()) * LANDSCAPE_BRUSH_SAMPLE_STEP;
+		if (radius <= 0.0f) {
+			return false;
+		}
+
+		const float cellMinX = float(land->gridX) * 8192.0f;
+		const float cellMaxX = cellMinX + 8192.0f;
+		const float cellMinY = float(land->gridY) * 8192.0f;
+		const float cellMaxY = cellMinY + 8192.0f;
+
+		const float brushMinX = centerInfo.nearestVertexWorldX - radius;
+		const float brushMaxX = centerInfo.nearestVertexWorldX + radius;
+		const float brushMinY = centerInfo.nearestVertexWorldY - radius;
+		const float brushMaxY = centerInfo.nearestVertexWorldY + radius;
+
+		// Decide which cardinal/diagonal neighbors are needed.
+		// xDir: -1 west, +1 east, 0 none. yDir similar.
+		int xDir = 0;
+		if (brushMinX <= cellMinX) xDir = -1;
+		else if (brushMaxX >= cellMaxX) xDir = 1;
+
+		int yDir = 0;
+		if (brushMinY <= cellMinY) yDir = -1;
+		else if (brushMaxY >= cellMaxY) yDir = 1;
+
+		Land* westLand = nullptr;
+		Land* eastLand = nullptr;
+		Land* southLand = nullptr;
+		Land* northLand = nullptr;
+		Land* swLand = nullptr;
+		Land* seLand = nullptr;
+		Land* nwLand = nullptr;
+		Land* neLand = nullptr;
+
+		const auto recordHandler = DataHandler::get()->recordHandler;
+		const auto getNeighborLand = [&](int dx, int dy) -> Land* {
+			auto cell = recordHandler->getCellByGridPosition(land->gridX + dx, land->gridY + dy);
+			if (cell == nullptr) {
+				return nullptr;
+			}
+			return cell->getOrCreateLand();
+		};
+
+		if (xDir == -1) westLand = getNeighborLand(-1, 0);
+		else if (xDir == 1) eastLand = getNeighborLand(1, 0);
+
+		if (yDir == -1) southLand = getNeighborLand(0, -1);
+		else if (yDir == 1) northLand = getNeighborLand(0, 1);
+
+		if (xDir != 0 && yDir != 0) {
+			if (xDir == -1 && yDir == -1) swLand = getNeighborLand(-1, -1);
+			else if (xDir ==  1 && yDir == -1) seLand = getNeighborLand( 1, -1);
+			else if (xDir == -1 && yDir ==  1) nwLand = getNeighborLand(-1,  1);
+			else if (xDir ==  1 && yDir ==  1) neLand = getNeighborLand( 1,  1);
+		}
+
+		// Touched land set for end-of-pass refresh/dirty handling.
+		Land* touchedLands[4] = { land, nullptr, nullptr, nullptr };
+		int touchedCount = 1;
+		if (xDir == -1 && westLand) touchedLands[touchedCount++] = westLand;
+		else if (xDir == 1 && eastLand) touchedLands[touchedCount++] = eastLand;
+		if (yDir == -1 && southLand) touchedLands[touchedCount++] = southLand;
+		else if (yDir == 1 && northLand) touchedLands[touchedCount++] = northLand;
+		if (xDir != 0 && yDir != 0) {
+			Land* diag = nullptr;
+			if (xDir == -1 && yDir == -1) diag = swLand;
+			else if (xDir ==  1 && yDir == -1) diag = seLand;
+			else if (xDir == -1 && yDir ==  1) diag = nwLand;
+			else if (xDir ==  1 && yDir ==  1) diag = neLand;
+			if (diag) touchedLands[touchedCount++] = diag;
+		}
+
+		const auto centerWorldX = worldPos->x;
+		const auto centerWorldY = worldPos->y;
+
+		// Per-sample land selection cache so we avoid recomputing the same quadrant repeatedly.
+		int lastQuadX = 2;
+		int lastQuadY = 2;
+		Land* sampleLand = land;
+
+		NI::Point3 samplePos;
+		samplePos.z = 0.0f;
+
+		for (float sampleX = brushMinX; sampleX < brushMaxX; sampleX += LANDSCAPE_BRUSH_SAMPLE_STEP) {
+			for (float sampleY = brushMinY; sampleY < brushMaxY; sampleY += LANDSCAPE_BRUSH_SAMPLE_STEP) {
+				// Determine which cell quadrant this sample falls in, mirroring vanilla:
+				//   sample.x < cellMinX -> -1 (west)
+				//   sample.x in [cellMinX, cellMaxX] -> 0 (self)
+				//   sample.x > cellMaxX -> +1 (east)
+				int qx;
+				if (sampleX < cellMinX) qx = -1;
+				else if (sampleX > cellMaxX) qx = 1;
+				else qx = 0;
+
+				int qy;
+				if (sampleY < cellMinY) qy = -1;
+				else if (sampleY > cellMaxY) qy = 1;
+				else qy = 0;
+
+				if (qx != lastQuadX || qy != lastQuadY) {
+					lastQuadX = qx;
+					lastQuadY = qy;
+					if (qx == -1) {
+						if (qy == -1) sampleLand = swLand;
+						else if (qy == 1) sampleLand = nwLand;
+						else sampleLand = westLand;
+					}
+					else if (qx == 1) {
+						if (qy == -1) sampleLand = seLand;
+						else if (qy == 1) sampleLand = neLand;
+						else sampleLand = eastLand;
+					}
+					else {
+						if (qy == -1) sampleLand = southLand;
+						else if (qy == 1) sampleLand = northLand;
+						else sampleLand = land;
+					}
+				}
+
+				if (sampleLand == nullptr) {
+					continue;
+				}
+
+				samplePos.x = sampleX;
+				samplePos.y = sampleY;
+
+				const auto dx = centerWorldX - sampleX;
+				const auto dy = centerWorldY - sampleY;
+				const auto distance = std::sqrt(dx * dx + dy * dy);
+				if (distance > radius) {
+					continue;
+				}
+
+				LandTileInfo sampleInfo;
+				if (!sampleLand->worldPosToTileInfo(&sampleInfo, &samplePos, false)) {
+					continue;
+				}
+
+				NI::PackedColor currentColor;
+				if (!sampleLand->getVertexColorAtTileInfo(&sampleInfo, &currentColor)) {
+					continue;
+				}
+
+				const auto falloff = (radius - distance) / radius;
+				const auto opacity = falloff * strength;
+
+				const auto blendR = blendChannel(currentColor.r, paintColor->r, blendMode);
+				const auto blendG = blendChannel(currentColor.g, paintColor->g, blendMode);
+				const auto blendB = blendChannel(currentColor.b, paintColor->b, blendMode);
+
+				const auto lerpChannel = [opacity](unsigned char current, unsigned char blend) -> unsigned char {
+					const auto value = float(current) + (float(blend) - float(current)) * opacity;
+					return static_cast<unsigned char>(std::clamp(int(value), 0, 255));
+				};
+
+				NI::PackedColor outColor;
+				outColor.r = lerpChannel(currentColor.r, blendR);
+				outColor.g = lerpChannel(currentColor.g, blendG);
+				outColor.b = lerpChannel(currentColor.b, blendB);
+				outColor.a = currentColor.a;
+
+				sampleLand->setVertexColorAtTile(&sampleInfo, &outColor, false);
+			}
+		}
+
+		for (int i = 0; i < touchedCount; ++i) {
+			auto touched = touchedLands[i];
+			if (touched == nullptr) {
+				continue;
+			}
+			touched->refreshGeometry();
+			touched->flags |= 2u;
+			touched->notifyModified();
+		}
+
+		const auto editorLandscapeRoot = DataHandler::get()->editorLandscapeRoot;
+		if (editorLandscapeRoot) {
+			editorLandscapeRoot->updateProperties();
+			editorLandscapeRoot->updateEffects();
+		}
+
+		if (gPaintLandModifiedFlag::get()) {
+			const auto hWnd = gRenderWindowHandle::get();
+			if (hWnd) {
+				SendMessageA(hWnd, 0x409u, 0, 1);
+			}
+		}
+
+		return true;
+	}
+
+	void alignSelection(bool posX, bool posY, bool posZ, bool rotX, bool rotY, bool rotZ, bool scale) {
+		auto selectionData = SelectionData::get();
+		auto lastTarget = selectionData->getLastTarget();
+		if (!lastTarget) {
+			return;
+		}
+
+		// An undo checkpoint is required before and after the movement or it will crash later on.
+		UndoManager::get()->storeCheckpoint(UndoManager::Action::Moved);
+
+		for (auto target = selectionData->firstTarget; target != lastTarget; target = target->next) {
+			auto reference = target->reference;
+
+			if (posX) {
+				reference->position.x = lastTarget->reference->position.x;
+			}
+			if (posY) {
+				reference->position.y = lastTarget->reference->position.y;
+			}
+			if (posZ) {
+				reference->position.z = lastTarget->reference->position.z;
+			}
+
+			if (rotX) {
+				reference->yetAnotherOrientation.x = lastTarget->reference->yetAnotherOrientation.x;
+			}
+			if (rotY) {
+				reference->yetAnotherOrientation.y = lastTarget->reference->yetAnotherOrientation.y;
+			}
+			if (rotZ) {
+				reference->yetAnotherOrientation.z = lastTarget->reference->yetAnotherOrientation.z;
+			}
+
+			if (scale) {
+				reference->setScale(lastTarget->reference->getScale());
+			}
+
+			// Not sure exactly why these exist...
+
+			reference->unknown_0x10 = reference->position;
+			reference->orientationNonAttached = reference->yetAnotherOrientation;
+		
+			// Update Scene Graph.
+
+			NI::Matrix33 rotation;
+			auto orientation = reference->yetAnotherOrientation;
+			rotation.fromEulerXYZ(orientation.x, orientation.y, orientation.z);
+
+			reference->updateRotationMatrixForRaceAndSex(rotation);
+			reference->sceneNode->setLocalRotationMatrix(&rotation);
+			reference->sceneNode->localTranslate = reference->position; 
+			reference->sceneNode->localScale = reference->getScale();
+			reference->sceneNode->update(0.0f, true, true);
+
+			DataHandler::get()->updateLightingForReference(reference);
+
+			reference->setAsEdited();
+		}
+
+		selectionData->recalculateBound();
+
+		// An undo checkpoint is required before and after the movement or it will crash later on.
+		UndoManager::get()->storeCheckpoint(UndoManager::Action::Moved);
+	}
+
+	void resetOrRandomizeSelection(bool rotX, bool rotY, bool rotZ, bool scale, bool randZ, bool randScale) {
+		auto selectionData = SelectionData::get();
+		unsigned int i = 0;
+
+		// An undo checkpoint is required before and after the movement or it will crash later on.
+		UndoManager::get()->storeCheckpoint(UndoManager::Action::Moved);
+
+		for (auto target = selectionData->firstTarget; i < SelectionData::get()->numberOfTargets; target = target->next, i++) {
+			auto reference = target->reference;
+
+			if (rotX) {
+				reference->yetAnotherOrientation.x = 0.0;
+			}
+			if (rotY) {
+				reference->yetAnotherOrientation.y = 0.0;
+			}
+			if (rotZ) {
+				reference->yetAnotherOrientation.z = 0.0;
+			}
+
+			if (scale) {
+				reference->setScale(1.0);
+			}
+
+			if (randZ) {
+				reference->yetAnotherOrientation.z = rotationDistribution(generator);
+			}
+
+			if (randScale) {
+				reference->setScale(scaleDistribution(generator));
+			}
+
+			// Not sure exactly why these exist...
+
+			reference->unknown_0x10 = reference->position;
+			reference->orientationNonAttached = reference->yetAnotherOrientation;
+
+			// Update Scene Graph.
+
+			NI::Matrix33 rotation;
+			auto orientation = reference->yetAnotherOrientation;
+			rotation.fromEulerXYZ(orientation.x, orientation.y, orientation.z);
+
+			reference->updateRotationMatrixForRaceAndSex(rotation);
+			reference->sceneNode->setLocalRotationMatrix(&rotation);
+			reference->sceneNode->localTranslate = reference->position;
+			reference->sceneNode->localScale = reference->getScale();
+			reference->sceneNode->update(0.0f, true, true);
+
+			DataHandler::get()->updateLightingForReference(reference);
+
+			reference->setAsEdited();
+		}
+
+		selectionData->recalculateBound();
+
+		// An undo checkpoint is required before and after the movement or it will crash later on.
+		UndoManager::get()->storeCheckpoint(UndoManager::Action::Moved);
+	}
+
+	static void hideSelectedReferences() {
+		auto selectionData = SelectionData::get();
+
+		auto hiddenLayer = lw::getLayerById(HIDDEN_LAYER_ID);
+
+		hiddenLayer->moveSelectionToLayer();
+
+		if (!hiddenLayer->isLayerHidden)
+		{
+			hiddenLayer->isLayerHidden = true;
+			hiddenLayer->refreshObjects();
+		}
+
+		selectionData->clear();
+
+		renderNextFrame();
+	}
+
+	void unhideAllReferences() {
+		auto hiddenLayer = lw::getLayerById(HIDDEN_LAYER_ID);
+		hiddenLayer->clearLayer();
+	}
+
+	void saveRenderStateToQuickStart() {
+		auto renderController = RenderController::get();
+		auto dataHandler = DataHandler::get();
+		auto recordHandler = dataHandler->recordHandler;
+		auto& quickstart = settings.quickstart;
+
+		// Restore quickstart state to be empty.
+		settings.quickstart = Settings_t::QuickstartSettings();
+
+		// Only store some data if we have a current cell.
+		auto currentCell = gCurrentCell::get();
+		if (currentCell) {
+			quickstart.load_cell = true;
+
+			// Store camera position.
+			quickstart.position[0] = renderController->camera->worldTransform.translation.x;
+			quickstart.position[1] = renderController->camera->worldTransform.translation.y;
+			quickstart.position[2] = renderController->camera->worldTransform.translation.z;
+
+			// Store camera orientation as euler angle.
+			NI::Point3 orientationVector;
+			renderController->node->getLocalRotationMatrix()->toEulerXYZ(&orientationVector);
+			quickstart.orientation[0] = orientationVector.x;
+			quickstart.orientation[1] = orientationVector.y;
+			quickstart.orientation[2] = orientationVector.z;
+
+			// If we're in an interior, store the cell ID.
+			if (currentCell == dataHandler->currentInteriorCell) {
+				quickstart.cell = gCurrentCell::get()->getObjectID();
+			}
+			else {
+				quickstart.cell.clear();
+			}
+		}
+		else {
+			quickstart.load_cell = false;
+			quickstart.position = { 0.0f, 0.0f, 0.0f };
+			quickstart.orientation = { 0.0f, 0.0f, 0.0f };
+			quickstart.cell.clear();
+		}
+
+		// Store the active game file list.
+		quickstart.data_files.clear();
+		for (auto i = 0; i < recordHandler->activeModCount; ++i) {
+			quickstart.data_files.push_back(recordHandler->activeGameFiles[i]->fileName);
+		}
+		
+		// Also store the current file set as active.
+		if (recordHandler->activeFile) {
+			quickstart.active_file = recordHandler->activeFile->fileName;
+		}
+
+		quickstart.enabled = true;
+
+		settings.save();
+	}
+
+	void clearRenderStateFromQuickStart() {
+		auto renderController = RenderController::get();
+		auto& quickstart = settings.quickstart;
+
+		quickstart.enabled = false;
+		quickstart.data_files.clear();
+		quickstart.active_file.clear();
+		quickstart.cell.clear();
+		quickstart.position = { 0.0f, 0.0f, 0.0f };
+		quickstart.orientation = { 0.0f, 0.0f, 0.0f };
+
+		settings.save();
+	}
+
+	void setTestingPositionToReference() {
+		auto target = SelectionData::get()->getLastTarget();
+		if (target == nullptr) {
+			return;
+		}
+
+		auto targetRef = target->reference;
+		if (targetRef == nullptr) {
+			return;
+		}
+
+		auto currentCell = gCurrentCell::get();
+		auto& test_environment = settings.test_environment;
+		if (currentCell->getIsInterior()) {
+			test_environment.starting_cell = currentCell->getObjectID();
+			test_environment.starting_grid = { 0, 0 };
+		}
+		else {
+			test_environment.starting_cell = "";
+			test_environment.starting_grid[0] = currentCell->gridX;
+			test_environment.starting_grid[1] = currentCell->gridY;
+		}
+		test_environment.position[0] = targetRef->position.x;
+		test_environment.position[1] = targetRef->position.y;
+		test_environment.position[2] = targetRef->position.z;
+		test_environment.orientation[0] = 0;
+		test_environment.orientation[1] = 0;
+		test_environment.orientation[2] = targetRef->orientationNonAttached.z;
+
+		settings.save();
+	}
+
+	void setTestingPositionToCamera() {
+		auto rendererController = RenderController::get();
+
+		auto currentCell = gCurrentCell::get();
+		auto& test_environment = settings.test_environment;
+		if (currentCell->getIsInterior()) {
+			test_environment.starting_cell = currentCell->getObjectID();
+			test_environment.starting_grid = { 0, 0 };
+		}
+		else {
+			test_environment.starting_cell = "";
+			test_environment.starting_grid[0] = currentCell->gridX;
+			test_environment.starting_grid[1] = currentCell->gridY;
+		}
+		test_environment.position[0] = rendererController->node->localTranslate.x;
+		test_environment.position[1] = rendererController->node->localTranslate.y;
+		test_environment.position[2] = rendererController->node->localTranslate.z;
+		test_environment.orientation[0] = 0;
+		test_environment.orientation[1] = 0;
+		test_environment.orientation[2] = 0;
+
+		settings.save();
+	}
+
+	void toggleLandscapeShown() {
+		using namespace landscape_edit_settings_window;
+
+		auto dataHandler = DataHandler::get();
+		auto landscapeRoot = dataHandler->editorLandscapeRoot;
+
+		const auto wasShown = !landscapeRoot->getAppCulled();
+
+		if (wasShown) {
+			setLandscapeEditingEnabled(false);
+			landscapeRoot->setAppCulled(true);
+		}
+		else {
+			setLandscapeEditingEnabled(true, true);
+			landscapeRoot->setAppCulled(false);
+		}
+	}
+
+	void toggleWaterShown() {
+		const auto dataHandler = DataHandler::get();
+		const auto waterRoot = dataHandler->waterRenderController->waterNode;
+
+		const auto wasShown = !waterRoot->getAppCulled();
+		if (wasShown) {
+			waterRoot->setAppCulled(true);
+		}
+		else {
+			waterRoot->setAppCulled(false);
+		}
+	}
+
+	void showContextAwareActionMenu(DialogProcContext& context) {
+		auto menu = CreatePopupMenu();
+		if (menu == NULL) {
+			return;
+		}
+
+		auto dataHandler = DataHandler::get();
+		auto recordHandler = dataHandler->recordHandler;
+		auto selectionData = SelectionData::get();
+		const bool hasReferencesSelected = selectionData->numberOfTargets > 0;
+
+		enum ContextMenuId {
+			RESERVED_ERROR,
+			RESERVED_NO_CALLBACK,
+			HIDE_SELECTION,
+			RESTORE_HIDDEN_REFERENCES,
+			SET_SNAPPING_AXIS_POSITIVE_X,
+			SET_SNAPPING_AXIS_NEGATIVE_X,
+			SET_SNAPPING_AXIS_POSITIVE_Y,
+			SET_SNAPPING_AXIS_NEGATIVE_Y,
+			SET_SNAPPING_AXIS_POSITIVE_Z,
+			SET_SNAPPING_AXIS_NEGATIVE_Z,
+			ALIGN_SELECTION_POSITION_X,
+			ALIGN_SELECTION_POSITION_Y,
+			ALIGN_SELECTION_POSITION_Z,
+			ALIGN_SELECTION_ROTATION_X,
+			ALIGN_SELECTION_ROTATION_Y,
+			ALIGN_SELECTION_ROTATION_Z,
+			ALIGN_SELECTION_SCALE,
+			ALIGN_SELECTION_ALL,
+			USE_GROUP_SCALING,
+			USE_WORLD_AXIS_ROTATION,
+			SAVE_STATE_TO_QUICKSTART,
+			CLEAR_STATE_FROM_QUICKSTART,
+			TEST_FROM_REFERENCE_POSITION,
+			TEST_FROM_CAMERA_POSITION,
+			HIDE_LANDSCAPE,
+			HIDE_WATER,
+			RESET_ROTATION_X,
+			RESET_ROTATION_Y,
+			RESET_ROTATION_Z,
+			RESET_SCALE,
+			RESET_ROTATION_X_AND_Y,
+			RESET_ROTATION_AND_SCALE,
+			RANDOMIZE_ROTATION_Z,
+			RANDOMIZE_SCALE,
+			RANDOMIZE_ROTATION_Z_AND_SCALE,
+			ASSIGN_TO_LAYER_BASE = 5000,
+		};
+
+		/*
+		* Reserved hotkeys:
+		*   D: Hide/show landscape.
+		*   M: Toggle legacy object movement
+		*   T: Hide/show water.
+		*	E: Change Reference Data
+		*	H: Hide Selection
+		*	L: Layer Management
+		*	R: Restore Hidden References
+		*	S: Set Snapping Axis
+		*	W: Toggle world axis rotation
+		*/
+
+		MENUITEMINFO menuItem = {};
+		menuItem.cbSize = sizeof(MENUITEMINFO);
+		unsigned int index = 0;
+
+		MENUITEMINFO subMenuSnappingAxis = {};
+		subMenuSnappingAxis.cbSize = sizeof(MENUITEMINFO);
+		subMenuSnappingAxis.hSubMenu = CreateMenu();
+
+		{
+			unsigned int subIndex = 0;
+
+			menuItem.wID = SET_SNAPPING_AXIS_POSITIVE_X;
+			menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+			menuItem.fType = MFT_STRING | MFT_RADIOCHECK;
+			menuItem.fState = (snappingAxis == SnappingAxis::POSITIVE_X) ? MFS_CHECKED : MFS_UNCHECKED;
+			menuItem.dwTypeData = (LPSTR)"+&X";
+			menuItem.hbmpChecked = NULL;
+			menuItem.hbmpUnchecked = NULL;
+			InsertMenuItemA(subMenuSnappingAxis.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = SET_SNAPPING_AXIS_NEGATIVE_X;
+			menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+			menuItem.fType = MFT_STRING | MFT_RADIOCHECK;
+			menuItem.fState = (snappingAxis == SnappingAxis::NEGATIVE_X) ? MFS_CHECKED : MFS_UNCHECKED;
+			menuItem.dwTypeData = (LPSTR)"-X";
+			InsertMenuItemA(subMenuSnappingAxis.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = SET_SNAPPING_AXIS_POSITIVE_Y;
+			menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+			menuItem.fType = MFT_STRING | MFT_RADIOCHECK;
+			menuItem.fState = (snappingAxis == SnappingAxis::POSITIVE_Y) ? MFS_CHECKED : MFS_UNCHECKED;
+			menuItem.dwTypeData = (LPSTR)"+&Y";
+			InsertMenuItemA(subMenuSnappingAxis.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = SET_SNAPPING_AXIS_NEGATIVE_Y;
+			menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+			menuItem.fType = MFT_STRING | MFT_RADIOCHECK;
+			menuItem.fState = (snappingAxis == SnappingAxis::NEGATIVE_Y) ? MFS_CHECKED : MFS_UNCHECKED;
+			menuItem.dwTypeData = (LPSTR)"-Y";
+			InsertMenuItemA(subMenuSnappingAxis.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = SET_SNAPPING_AXIS_POSITIVE_Z;
+			menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+			menuItem.fType = MFT_STRING | MFT_RADIOCHECK;
+			menuItem.fState = (snappingAxis == SnappingAxis::POSITIVE_Z) ? MFS_CHECKED : MFS_UNCHECKED;
+			menuItem.dwTypeData = (LPSTR)"+&Z";
+			InsertMenuItemA(subMenuSnappingAxis.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = SET_SNAPPING_AXIS_NEGATIVE_Z;
+			menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+			menuItem.fType = MFT_STRING | MFT_RADIOCHECK;
+			menuItem.fState = (snappingAxis == SnappingAxis::NEGATIVE_Z) ? MFS_CHECKED : MFS_UNCHECKED;
+			menuItem.dwTypeData = (LPSTR)"-Z";
+			InsertMenuItemA(subMenuSnappingAxis.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			CheckMenuRadioItem(subMenuSnappingAxis.hSubMenu, 0, 5, (UINT)snappingAxis, MF_BYPOSITION);
+		}
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_SUBMENU | MIIM_TYPE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = hasReferencesSelected ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.hSubMenu = subMenuSnappingAxis.hSubMenu;
+		menuItem.dwTypeData = (LPSTR)"Set &Snapping Axis";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		MENUITEMINFO subMenuAlignReferences = {};
+		subMenuAlignReferences.cbSize = sizeof(MENUITEMINFO);
+		subMenuAlignReferences.hSubMenu = CreateMenu();
+
+		{
+			unsigned int subIndex = 0;
+
+			menuItem.wID = ALIGN_SELECTION_POSITION_X;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align Position X";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = ALIGN_SELECTION_POSITION_Y;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align Position Y";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = ALIGN_SELECTION_POSITION_Z;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align Position Z";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESERVED_NO_CALLBACK;
+			menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+			menuItem.fType = MFT_SEPARATOR;
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = ALIGN_SELECTION_ROTATION_X;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align Rotation X";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = ALIGN_SELECTION_ROTATION_Y;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align Rotation Y";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = ALIGN_SELECTION_ROTATION_Z;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align Rotation Z";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESERVED_NO_CALLBACK;
+			menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+			menuItem.fType = MFT_SEPARATOR;
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = ALIGN_SELECTION_SCALE;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align Scale";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESERVED_NO_CALLBACK;
+			menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+			menuItem.fType = MFT_SEPARATOR;
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = ALIGN_SELECTION_ALL;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Align All";
+			InsertMenuItemA(subMenuAlignReferences.hSubMenu, subIndex++, TRUE, &menuItem);
+		}
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_SUBMENU | MIIM_TYPE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = hasReferencesSelected ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.hSubMenu = subMenuAlignReferences.hSubMenu;
+		menuItem.dwTypeData = (LPSTR)"Align References";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		MENUITEMINFO subMenuReferenceData = {};
+		subMenuReferenceData.cbSize = sizeof(MENUITEMINFO);
+		subMenuReferenceData.hSubMenu = CreateMenu();
+
+		{
+			unsigned int subIndex = 0;
+
+			menuItem.wID = RESET_ROTATION_X;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Reset Rotation &X";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESET_ROTATION_Y;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Reset Rotation &Y";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESET_ROTATION_Z;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Reset Rotation &Z";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESERVED_NO_CALLBACK;
+			menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+			menuItem.fType = MFT_SEPARATOR;
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESET_SCALE;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Reset &Scale";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESERVED_NO_CALLBACK;
+			menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+			menuItem.fType = MFT_SEPARATOR;
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESET_ROTATION_X_AND_Y;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Reset Rotation X and Y";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESET_ROTATION_AND_SCALE;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Reset Rotation and Scale";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RESERVED_NO_CALLBACK;
+			menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+			menuItem.fType = MFT_SEPARATOR;
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RANDOMIZE_ROTATION_Z;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Randomize Rotation Z";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RANDOMIZE_SCALE;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"Randomize Scale";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+
+			menuItem.wID = RANDOMIZE_ROTATION_Z_AND_SCALE;
+			menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+			menuItem.fType = MFT_STRING;
+			menuItem.fState = MFS_ENABLED;
+			menuItem.dwTypeData = (LPSTR)"&Randomize Rotation Z and Scale";
+			InsertMenuItemA(subMenuReferenceData.hSubMenu, subIndex++, TRUE, &menuItem);
+		}
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_SUBMENU | MIIM_TYPE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = hasReferencesSelected ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.hSubMenu = subMenuReferenceData.hSubMenu;
+		menuItem.dwTypeData = (LPSTR)"R&eference Data";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = USE_GROUP_SCALING;
+		menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = (settings.render_window.use_group_scaling) ? MFS_CHECKED : MFS_UNCHECKED;
+		menuItem.dwTypeData = (LPSTR)"Use Group Scaling";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+		CheckMenuItem(menu, USE_GROUP_SCALING, (settings.render_window.use_group_scaling) ? MFS_CHECKED : MFS_UNCHECKED);
+
+		menuItem.wID = USE_WORLD_AXIS_ROTATION;
+		menuItem.fMask = MIIM_FTYPE | MIIM_CHECKMARKS | MIIM_STRING | MIIM_ID;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = (settings.render_window.use_world_axis_rotations_by_default) ? MFS_CHECKED : MFS_UNCHECKED;
+		menuItem.dwTypeData = (LPSTR)"Use &World Rotation Axis";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+		CheckMenuItem(menu, USE_WORLD_AXIS_ROTATION, (settings.render_window.use_world_axis_rotations_by_default) ? MFS_CHECKED : MFS_UNCHECKED);
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+		menuItem.fType = MFT_SEPARATOR;
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = HIDE_SELECTION;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = hasReferencesSelected ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.dwTypeData = (LPSTR)"&Hide Selection";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = RESTORE_HIDDEN_REFERENCES;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = MFS_ENABLED;
+		menuItem.dwTypeData = (LPSTR)"&Restore Hidden References";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		MENUITEMINFO subMenuAssignLayer = {};
+		subMenuAssignLayer.cbSize = sizeof(MENUITEMINFO);
+		subMenuAssignLayer.hSubMenu = CreatePopupMenu();
+
+		for (size_t i = 0; i < lw::g_Layers.size(); ++i) {
+			auto layer = lw::g_Layers[i];
+			std::string name = (layer->layerName) ? *layer->layerName : "Unnamed";
+			std::string label = std::to_string(i + 1) + ": " + name;
+
+			AppendMenuA(subMenuAssignLayer.hSubMenu, MF_STRING, ASSIGN_TO_LAYER_BASE + layer->id, label.c_str());
+		}
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_SUBMENU | MIIM_TYPE | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = hasReferencesSelected ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.hSubMenu = subMenuAssignLayer.hSubMenu;
+		menuItem.dwTypeData = (LPSTR)"Assign Selection to &Layer";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+		menuItem.fType = MFT_SEPARATOR;
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = HIDE_LANDSCAPE;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = MFS_ENABLED;
+		menuItem.dwTypeData = (LPSTR)"Hide lan&dscape";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+		CheckMenuItem(menu, HIDE_LANDSCAPE, dataHandler->editorLandscapeRoot->getAppCulled() ? MFS_CHECKED : MFS_UNCHECKED);
+
+		menuItem.wID = HIDE_WATER;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = MFS_ENABLED;
+		menuItem.dwTypeData = (LPSTR)"Hide wa&ter";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+		CheckMenuItem(menu, HIDE_WATER, dataHandler->waterRenderController->waterNode->getAppCulled() ? MFS_CHECKED : MFS_UNCHECKED);
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+		menuItem.fType = MFT_SEPARATOR;
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = SAVE_STATE_TO_QUICKSTART;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = (recordHandler->activeModCount > 0) ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.dwTypeData = (LPSTR)"Save State to QuickStart";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = CLEAR_STATE_FROM_QUICKSTART;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = settings.quickstart.enabled ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.dwTypeData = (LPSTR)"Clear QuickStart";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = RESERVED_NO_CALLBACK;
+		menuItem.fMask = MIIM_FTYPE | MIIM_ID;
+		menuItem.fType = MFT_SEPARATOR;
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = TEST_FROM_REFERENCE_POSITION;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = SelectionData::get()->numberOfTargets > 0 ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.dwTypeData = (LPSTR)"Use reference position for testing";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		menuItem.wID = TEST_FROM_CAMERA_POSITION;
+		menuItem.fMask = MIIM_FTYPE | MIIM_STRING | MIIM_ID | MIIM_STATE;
+		menuItem.fType = MFT_STRING;
+		menuItem.fState = gCurrentCell::get() ? MFS_ENABLED : MFS_DISABLED;
+		menuItem.dwTypeData = (LPSTR)"Use camera position for testing";
+		InsertMenuItemA(menu, index++, TRUE, &menuItem);
+
+		POINT p;
+		GetCursorPos(&p);
+
+		// Due to where this message is, prevent annoying beep sound when the tracking of the menu consumes shit.
+		MSG msg;
+		PeekMessage(&msg, NULL, WM_CHAR, WM_CHAR, PM_REMOVE);
+
+		const auto hWndRenderWindow = context.getWindowHandle();
+		auto result = TrackPopupMenuEx(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_LEFTBUTTON | TPM_NOANIMATION | TPM_VERTICAL, p.x, p.y, hWndRenderWindow, NULL);
+		
+		switch (result) {
+		case RESERVED_ERROR:
+			break;
+		case HIDE_SELECTION:
+			hideSelectedReferences();
+			break;
+		case RESTORE_HIDDEN_REFERENCES:
+			unhideAllReferences();
+			break;
+		case SET_SNAPPING_AXIS_POSITIVE_X:
+			snappingAxis = SnappingAxis::POSITIVE_X;
+			break;
+		case SET_SNAPPING_AXIS_NEGATIVE_X:
+			snappingAxis = SnappingAxis::NEGATIVE_X;
+			break;
+		case SET_SNAPPING_AXIS_POSITIVE_Y:
+			snappingAxis = SnappingAxis::POSITIVE_Y;
+			break;
+		case SET_SNAPPING_AXIS_NEGATIVE_Y:
+			snappingAxis = SnappingAxis::NEGATIVE_Y;
+			break;
+		case SET_SNAPPING_AXIS_POSITIVE_Z:
+			snappingAxis = SnappingAxis::POSITIVE_Z;
+			break;
+		case SET_SNAPPING_AXIS_NEGATIVE_Z:
+			snappingAxis = SnappingAxis::NEGATIVE_Z;
+			break;
+		case ALIGN_SELECTION_POSITION_X:
+			alignSelection(true, false, false, false, false, false, false);
+			break;
+		case ALIGN_SELECTION_POSITION_Y:
+			alignSelection(false, true, false, false, false, false, false);
+			break;
+		case ALIGN_SELECTION_POSITION_Z:
+			alignSelection(false, false, true, false, false, false, false);
+			break;
+		case ALIGN_SELECTION_ROTATION_X:
+			alignSelection(false, false, false, true, false, false, false);
+			break;
+		case ALIGN_SELECTION_ROTATION_Y:
+			alignSelection(false, false, false, false, true, false, false);
+			break;
+		case ALIGN_SELECTION_ROTATION_Z:
+			alignSelection(false, false, false, false, false, true, false);
+			break;
+		case ALIGN_SELECTION_SCALE:
+			alignSelection(false, false, false, false, false, false, true);
+			break;
+		case ALIGN_SELECTION_ALL:
+			alignSelection(true, true, true, true, true, true, true);
+			break;
+		case RESET_ROTATION_X:
+			resetOrRandomizeSelection(true, false, false, false, false, false);
+			break;
+		case RESET_ROTATION_Y:
+			resetOrRandomizeSelection(false, true, false, false, false, false);
+			break;
+		case RESET_ROTATION_Z:
+			resetOrRandomizeSelection(false, false, true, false, false, false);
+			break;
+		case RESET_SCALE:
+			resetOrRandomizeSelection(false, false, false, true, false, false);
+			break;
+		case RESET_ROTATION_X_AND_Y:
+			resetOrRandomizeSelection(true, true, false, false, false, false);
+			break;
+		case RESET_ROTATION_AND_SCALE:
+			resetOrRandomizeSelection(true, true, true, true, false, false);
+			break;
+		case RANDOMIZE_ROTATION_Z:
+			resetOrRandomizeSelection(false, false, false, false, true, false);
+			break;
+		case RANDOMIZE_SCALE:
+			resetOrRandomizeSelection(false, false, false, false, false, true);
+			break;
+		case RANDOMIZE_ROTATION_Z_AND_SCALE:
+			resetOrRandomizeSelection(false, false, false, false, true, true);
+			break;
+		case USE_GROUP_SCALING:
+			settings.render_window.use_group_scaling = !settings.render_window.use_group_scaling;
+			settings.save();
+			break;
+		case USE_WORLD_AXIS_ROTATION:
+			settings.render_window.use_world_axis_rotations_by_default = !settings.render_window.use_world_axis_rotations_by_default;
+			settings.save();
+			break;
+		case SAVE_STATE_TO_QUICKSTART:
+			saveRenderStateToQuickStart();
+			break;
+		case CLEAR_STATE_FROM_QUICKSTART:
+			clearRenderStateFromQuickStart();
+			break;
+		case TEST_FROM_REFERENCE_POSITION:
+			setTestingPositionToReference();
+			break;
+		case TEST_FROM_CAMERA_POSITION:
+			setTestingPositionToCamera();
+			break;
+		case HIDE_LANDSCAPE:
+			toggleLandscapeShown();
+			break;
+		case HIDE_WATER:
+			toggleWaterShown();
+			break;
+		default:
+			if (result >= ASSIGN_TO_LAYER_BASE && result < ASSIGN_TO_LAYER_BASE + MAX_LAYERS) {
+				size_t layerId = result - ASSIGN_TO_LAYER_BASE;
+				auto targetLayer = lw::getLayerById(layerId);
+				if (targetLayer) {
+					targetLayer->moveSelectionToLayer();
+				}
+			}
+			else {
+				log::stream << "Unknown render window context menu ID " << result << " used!" << std::endl;
+			}
+			break;
+		}
+
+		// Cleanup our menus.
+		DestroyMenu(subMenuAssignLayer.hSubMenu);
+		DestroyMenu(subMenuSnappingAxis.hSubMenu);
+		DestroyMenu(subMenuAlignReferences.hSubMenu);
+		DestroyMenu(subMenuReferenceData.hSubMenu);
+		DestroyMenu(menu);
+
+		// We also stole paint stuff, so repaint.
+		SendMessage(hWndRenderWindow, WM_PAINT, 0, 0);
+		context.setResult(TRUE);
+	}
+
+	namespace grid {
+		static void update() {
+			// Angle snapping is not currently not implemented for legacy rotation mode.
+			bool useWorldAxisRotation = settings.render_window.use_world_axis_rotations_by_default;
+			if (!useWorldAxisRotation && gIsRotating::get()) {
+				return;
+			}
+
+			// Grid snapping is not currently not implemented for legacy movement mode.
+			bool useLegacyObjectMovement = settings.render_window.use_legacy_object_movement;
+			if (useLegacyObjectMovement && gIsTranslating::get()) {
+				return;
+			}
+
+			auto widgets = SceneGraphController::get()->getWidgets();
+			if (!widgets) {
+				return;
+			}
+
+			auto target = SelectionData::get()->getLastTarget();
+			if (!target) {
+				return;
+			}
+
+			auto sceneNode = target->reference->sceneNode;
+			
+			if (gIsRotating::get()) {
+				widgets->updateAngleGuideGeometry(
+					sceneNode->worldBoundRadius,
+					(float)gSnapAngleInDegrees::get()
+				);
+				widgets->updateAngleGuidePosition(
+					sceneNode->localTranslate,
+					gIsHoldingX::get(),
+					gIsHoldingY::get(),
+					gIsHoldingZ::get(),
+					gSnapAngleInDegrees::get()
+				);
+			}
+			else {
+				widgets->updateGridGeometry(
+					sceneNode->worldBoundRadius,
+					gSnapGrid::get()
+				);
+				widgets->updateGridPosition(
+					sceneNode->localTranslate,
+					gIsHoldingX::get(),
+					gIsHoldingY::get(),
+					gIsHoldingZ::get(),
+					gSnapGrid::get()
+				);
+			}
+
+			widgets->showGrid();
+
+			renderNextFrame();
+		}
+
+		static void hide() {
+			auto widgets = SceneGraphController::get()->getWidgets();
+			if (widgets->isGridShown()) {
+				widgets->hideGrid();
+				renderNextFrame();
+			}
+		}
+
+		static int prevStep(const std::vector<int>& steps, int current) {
+			for (auto itt = steps.rbegin(); itt != steps.rend(); ++itt) {
+				const auto& step = *itt;
+				if (step < current) {
+					return step;
+				}
+			}
+			return steps.front();
+		}
+
+		static int nextStep(const std::vector<int>& steps, int current) {
+			for (const auto step : steps) {
+				if (step > current) {
+					return step;
+				}
+			}
+			return steps.back();
+		}
+
+	}
+
+	void PatchDialogProc_BeforeMouseMove(DialogProcContext& context) {
+		// Cache cursor position.
+		lastCursorPosX = context.getMouseMoveX();
+		lastCursorPosY = context.getMouseMoveY();
+	}
+
+	void PatchDialogProc_BeforeLMouseButtonDown(DialogProcContext& context) {
+		movementContext.reset();
+	}
+
+	void PatchDialogProc_BeforeLMouseButtonUp(DialogProcContext& context) {
+		// Prevent selection changes during object rotation mode. Prevents non-undoable changes, and a crash if the selection becomes empty.
+		if (gIsRotating::get()) {
+			context.setResult(FALSE);
+		}
+	}
+
+	void PatchDialogProc_BeforeLMouseDoubleClick(DialogProcContext& context) {
+		// Prevent opening details dialog during object rotation mode.
+		if (gIsRotating::get()) {
+			context.setResult(FALSE);
+		}
+	}
+
+	void PatchDialogProc_BeforeRMouseButtonDown(DialogProcContext& context) {
+		constexpr auto comboPickLandscapeTexture = MK_CONTROL | MK_RBUTTON;
+		const auto controlState = context.getWParam();
+		resetTexturePaintDragState();
+
+		if ((controlState & comboPickLandscapeTexture) == comboPickLandscapeTexture) {
+			if (PickLandscapeTexture(context.getWindowHandle())) {
+				context.setResult(TRUE);
+			}
+		}
+	}
+
+	void PatchDialogProc_BeforeMouseWheel(DialogProcContext& context) {
+		using windows::isControlDown;
+		using windows::isRightMouseDown;
+
+		if (isControlDown()) {
+			// Allows Control+MouseWheel to adjust grid snap setting.
+			// Set override flag so we don't also modify camera zoom.
+			context.setResult(TRUE);
+
+			const auto delta = context.getMouseWheelDelta();
+
+			if (gIsRotating::get()) {
+				auto& steps = settings.render_window.angle_steps;
+				if (steps.size() == 0) {
+					return;
+				}
+
+				auto current = gSnapAngleInDegrees::get();
+				gSnapAngleInDegrees::set(
+					delta > 0 ? grid::prevStep(steps, current) : grid::nextStep(steps, current)
+				);
+			}
+			else {
+				auto& steps = settings.render_window.grid_steps;
+				if (steps.size() == 0) {
+					return;
+				}
+
+				auto current = gSnapGrid::get();
+				gSnapGrid::set(
+					delta > 0 ? grid::nextStep(steps, current) : grid::prevStep(steps, current)
+				);
+			}
+
+			grid::update();
+		}
+	}
+
+	void PatchDialogProc_BeforeSetCameraPosition(DialogProcContext& context) {
+		if (RenderController::get()->node == nullptr) {
+			context.setResult(FALSE);
+		}
+	}
+
+	constexpr UINT layerHotkeyTimer = 0x418u;
+	static int g_LayerInputAccumulator = 0;
+	static bool g_LayerInputModeOverlay = false; // false = hidden, true = overlay
+
+	void PatchDialogProc_BeforeTimer(DialogProcContext& context) {
+		// Fixup window capture if we've lost it when panning.
+		if (gIsPanning::get() && GetCapture() != gRenderWindowHandle::get()) {
+			SetCapture(gRenderWindowHandle::get());
+		}
+
+		if (context.getWParam() == layerHotkeyTimer) {
+			KillTimer(context.getWindowHandle(), layerHotkeyTimer);
+
+			if (g_LayerInputAccumulator > 0) {
+				size_t layerIndex = static_cast<size_t>(g_LayerInputAccumulator) - 1;
+
+				lw::toggleLayerVisuals(layerIndex, g_LayerInputModeOverlay);
+			}
+
+			g_LayerInputAccumulator = 0;
+			context.setResult(TRUE);
+		}
+	}
+
+	//
+	// Patch: Defer the render window's D3D device reset until a resize drag ends.
+	//
+
+	static bool isResizingRenderWindow = false;
+
+	void PatchDialogProc_BeforeEnterSizeMove(DialogProcContext& context) {
+		isResizingRenderWindow = true;
+	}
+
+	void PatchDialogProc_BeforeSize(DialogProcContext& context) {
+		// Skip the vanilla device reset + scene graph update while a drag is in progress.
+		if (isResizingRenderWindow) {
+			context.setResult(0);
+		}
+	}
+
+	void PatchDialogProc_BeforeExitSizeMove(DialogProcContext& context) {
+		if (!isResizingRenderWindow) {
+			return;
+		}
+		isResizingRenderWindow = false;
+
+		// Resend WM_SIZE with the final client dimensions.
+		RECT clientRect;
+		if (GetClientRect(context.getWindowHandle(), &clientRect)) {
+			const auto width = clientRect.right - clientRect.left;
+			const auto height = clientRect.bottom - clientRect.top;
+			SendMessageA(context.getWindowHandle(), WM_SIZE, SIZE_RESTORED, MAKELPARAM(width, height));
+		}
+	}
+
+	void PatchDialogProc_AfterLMouseButtonUp(DialogProcContext& context) {
+		grid::hide();
+
+		// see: Patch_ReplaceScalingLogic
+		if (selectionNeedsScaleUpdate) {
+			selectionNeedsScaleUpdate = false;
+			for (auto target = SelectionData::get()->firstTarget; target; target = target->next) {
+				target->reference->setScale(target->reference->sceneNode->localScale);
+			}
+		}
+	}
+
+	void PatchDialogProc_AfterRMouseButtonDown(DialogProcContext& context) {
+		using windows::isControlDown;
+
+		if (isControlDown()) {
+			grid::update();
+		}
+	}
+
+	void PatchDialogProc_AfterRMouseButtonUp(DialogProcContext& context) {
+		using windows::isControlDown;
+
+		resetTexturePaintDragState();
+
+		if (isControlDown()) {
+			grid::hide();
+		}
+	}
+
+	void focusReference(const Reference* reference) {
+		const auto CS_DataHandler_403A8F = reinterpret_cast<void(__thiscall*)(DataHandler*, Cell*, const NI::Point3*)>(0x403A8F);
+		const auto CS_DataHandler_4034B8 = reinterpret_cast<void(__thiscall*)(DataHandler*, const NI::Point3*)>(0x4034B8);
+		const auto CS_SendCommandToLoadCell = reinterpret_cast<void(__cdecl*)(const NI::Point3*, const Reference*)>(0x403A12);
+
+		const auto dataHandler = DataHandler::get();
+		const auto cell = reference->getCell();
+		if (cell->getIsInterior()) {
+			CS_DataHandler_403A8F(dataHandler, cell, &reference->position);
+		}
+		else if (dataHandler->currentInteriorCell) {
+			CS_DataHandler_4034B8(dataHandler, &reference->position);
+		}
+
+		CS_SendCommandToLoadCell(&reference->position, reference);
+	}
+
+	void PatchDialogProc_BeforeKeyDown_F2(DialogProcContext& context) {
+		using windows::isControlDown;
+		using windows::isShiftDown;
+
+		const auto selectionData = SelectionData::get();
+		if (selectionData->firstTarget == nullptr) {
+			return;
+		}
+
+		const auto reference = selectionData->firstTarget->reference;
+
+		// If we are holding the shift key, open the base object editor.
+		if (isShiftDown()) {
+			window::main::showObjectEditWindow(reference->baseObject);
+		}
+		// If control is down, focus the associated marker/door.
+		else if (isControlDown()) {
+			const auto baseObject = reference->baseObject;
+			// Door markers focus the associated door.
+			if (baseObject == Static::gDoorMarker::get()) {
+				const auto loadDoor = reference->getDoorMarkerBackReference();
+				if (loadDoor) {
+					focusReference(loadDoor);
+				}
+			}
+			else if (baseObject->objectType == ObjectType::Door) {
+				const auto travelDestination = reference->getTravelDestination();
+				if (travelDestination) {
+					focusReference(travelDestination->destination);
+				}
+			}
+		}
+		// If no modifier keys are pressed, edit the reference.
+		else {
+			window::main::showObjectEditWindow(reference);
+		}
+
+		context.setResult(TRUE);
+	}
+
+	void PatchDialogProc_BeforeKeyDown(DialogProcContext& context) {
+		using windows::isControlDown;
+		using windows::isShiftDown;
+
+		const auto landscapeEditWindow = landscape_edit_settings_window::gWindowHandle::get();
+		const auto vkCode = context.getKeyVirtualCode();
+
+		if (vkCode >= '0' && vkCode <= '9') {
+			bool ctrl = isControlDown();
+			bool shift = isShiftDown();
+
+			if (ctrl || shift) {
+				// Reset accumulator if switching modes or starting new sequence
+				if (g_LayerInputAccumulator == 0) {
+					g_LayerInputModeOverlay = shift;
+				}
+
+				int digit = vkCode - '0';
+				g_LayerInputAccumulator = (g_LayerInputAccumulator * 10) + digit;
+
+				// Reset the timer to wait for next digit
+				SetTimer(context.getWindowHandle(), layerHotkeyTimer, 400, NULL);
+
+				context.setResult(TRUE);
+				return;
+			}
+		}
+
+		switch (vkCode) {
+		case VK_F2:
+			PatchDialogProc_BeforeKeyDown_F2(context);
+			break;
+		case VK_OEM_4: // [
+			if (landscapeEditWindow) {
+				landscape_edit_settings_window::decrementEditRadius();
+				context.setResult(TRUE);
+			}
+			break;
+		case VK_OEM_6: // ]
+			if (landscapeEditWindow) {
+				landscape_edit_settings_window::incrementEditRadius();
+				context.setResult(TRUE);
+			}
+			break;
+		case 'F':
+			if (landscapeEditWindow) {
+				if (!context.getKeyWasDown()) {
+					landscape_edit_settings_window::setFlattenLandscapeVertices(!landscape_edit_settings_window::getFlattenLandscapeVertices());
+				}
+				context.setResult(TRUE);
+			}
+			break;
+		case 'H':
+			// Ctrl+H -> Open "Search and Replace" menu.
+			if (isControlDown()) {
+				SendMessageA(window::main::ghWnd::get(), WM_COMMAND, window::main::WM_COMMAND_OPEN_SEARCH_AND_REPLACE, 0);
+				context.setResult(TRUE);
+			}
+			// H otherwise opens the terrain window.
+			break;
+		case 'S':
+			if (landscapeEditWindow) {
+				if (!context.getKeyWasDown()) {
+					landscape_edit_settings_window::setSoftenLandscapeVertices(!landscape_edit_settings_window::getSoftenLandscapeVertices());
+				}
+				context.setResult(TRUE);
+			}
+			break;
+		case 'O':
+			if (landscapeEditWindow) {
+				if (!context.getKeyWasDown()) {
+					landscape_edit_settings_window::setEditLandscapeColor(!landscape_edit_settings_window::getEditLandscapeColor());
+				}
+				context.setResult(TRUE);
+			}
+			break;
+		case 'X':
+			// If we are modifying an object, prevent the default cut function from happening.
+			if (isModifyingObject()) {
+				resetCumulativeRotationValues();
+				gIsHoldingX::set(true);
+				context.setResult(TRUE);
+			}
+			// Prevent attempting to cut when there's nothing selected.
+			else if (isControlDown() && SelectionData::get()->firstTarget == nullptr) {
+				context.setResult(TRUE);
+			}
+			break;
+		case 'Y':
+			// If we are modifying an object, prevent the default redo function from happening.
+			if (isModifyingObject()) {
+				resetCumulativeRotationValues();
+				gIsHoldingY::set(true);
+				context.setResult(TRUE);
+			}
+			break;
+		case 'Z':
+			// If we are modifying an object, prevent the default undo function from happening.
+			if (isModifyingObject()) {
+				resetCumulativeRotationValues();
+				gIsHoldingZ::set(true);
+				context.setResult(TRUE);
+			}
+			break;
+		}
+
+		// Handle pressing a new axis key while we were already in grid/angle snapping mode.
+		if (!context.getKeyWasDown() && isControlDown() && isModifyingObject()) {
+			switch (context.getKeyVirtualCode()) {
+			case 'X':
+			case 'Y':
+			case 'Z':
+				grid::update();
+				break;
+			}
+		}
+	}
+
+	void PatchDialogProc_AfterKeyDown(DialogProcContext& context) {
+		switch (context.getKeyVirtualCode()) {
+		case 'Q':
+			showContextAwareActionMenu(context);
+			break;
+		case VK_CONTROL:
+			if (!context.getKeyWasDown() && (gIsTranslating::get() || gIsRotating::get())) {
+				grid::update();
+			}
+			break;
+		}
+	}
+
+	void PatchDialogProc_AfterKeyUp_XYZ(DialogProcContext& context) {
+		// Hide widgets if they are no longer needed.
+		auto widgets = SceneGraphController::get()->getWidgets();
+		if (!isHoldingAxisKey() && widgets->isShown()) {
+			widgets->hide();
+			movementContext.reset();
+			renderNextFrame();
+		}
+
+		// If we released an X/Y/Z key update the grid to show the right angle.
+		if (widgets->isGridShown()) {
+			grid::update();
+		}
+	}
+
+	void PatchDialogProc_AfterKeyUp_Control(DialogProcContext& context) {
+		grid::hide();
+	}
+
+	void PatchDialogProc_AfterKeyUp(DialogProcContext& context) {
+		switch (context.getKeyVirtualCode()) {
+		case 'X':
+		case 'Y':
+		case 'Z':
+			PatchDialogProc_AfterKeyUp_XYZ(context);
+			break;
+		case VK_CONTROL:
+			PatchDialogProc_AfterKeyUp_Control(context);
+			break;
+		}
+	}
+
+	void PatchDialogProc_AfterRefreshLandDisc(DialogProcContext& context) {
+		updateLandscapeCircleWidget();
+	}
+
+	// Window message 0x407 is the engine's "place dragged objects" handler: the native
+	// Object Window sends it to the render window to commit a drag-drop placement, and
+	// we reuse the same flow for external drops.
+	namespace CustomWindowMessage {
+		constexpr UINT PlaceDroppedObjects = 0x407u;
+		constexpr UINT SetCameraPosition = 0x40Eu;
+		constexpr UINT RefreshLandscapeEditDisc = 0x417u;
+	}
+
+	// External drag-and-drop payload limits.
+	constexpr SIZE_T MAX_DROP_PAYLOAD_BYTES = 64 * 1024; // Largest accepted clipboard payload (64 KB).
+	constexpr size_t MAX_DROP_OBJECTS = 256;             // Most objects accepted in a single drop.
+	constexpr size_t MAX_EDITOR_ID_LENGTH = 256;         // Longest accepted editor ID.
+
+	static HWND g_registeredDropHwnd = nullptr;
+	static bool g_oleInitialized = false;
+
+	static bool isNativePlacementAvailable() {
+		using landscape_edit_settings_window::getLandscapeEditingEnabled;
+		return !getLandscapeEditingEnabled()
+			&& !gIsReferencePicking::get()
+			&& !gIsPathGridEditing::get()
+			&& !gIsPreviewMode::get();
+	}
+
+	class RenderWindowDropTarget : public IDropTarget {
+	private:
+		HWND m_hWnd = nullptr;
+		ULONG m_refCount = 1;
+		std::vector<std::string> m_cachedIds;
+		bool m_dragAccepted = false;
+
+		RenderWindowDropTarget() = default;
+		~RenderWindowDropTarget() = default;
+
+		RenderWindowDropTarget(const RenderWindowDropTarget&) = delete;
+		RenderWindowDropTarget& operator=(const RenderWindowDropTarget&) = delete;
+
+		// A non-exhaustive pre-filter matching the object types the engine's placement
+		// handler accepts. The real engine handler performs the final context-dependent
+		// validation and we only report success based on what it actually placed.
+		bool isValidDropTarget(BaseObject* obj) const {
+			if (!obj || obj->getDeleted()) {
+				return false;
+			}
+			switch (obj->objectType) {
+			case ObjectType::Activator:
+			case ObjectType::Apparatus:
+			case ObjectType::Armor:
+			case ObjectType::Bodypart:
+			case ObjectType::Book:
+			case ObjectType::Clothing:
+			case ObjectType::Container:
+			case ObjectType::Door:
+			case ObjectType::Ingredient:
+			case ObjectType::Light:
+			case ObjectType::Lockpick:
+			case ObjectType::Misc:
+			case ObjectType::Probe:
+			case ObjectType::Repair:
+			case ObjectType::Static:
+			case ObjectType::Weapon:
+			case ObjectType::NPC:
+			case ObjectType::Creature:
+			case ObjectType::LeveledCreature:
+			case ObjectType::Alchemy:
+				return true;
+			default:
+				return false;
+			}
+		}
+
+		size_t parseHeaderOffset(std::string_view html, std::string_view key) {
+			size_t keyPos = html.find(key);
+			if (keyPos == std::string::npos) return 0;
+			size_t valStart = keyPos + key.size();
+			while (valStart < html.size() && (html[valStart] == ':' || html[valStart] == ' ' || html[valStart] == '\t')) {
+				valStart++;
+			}
+			size_t valEnd = valStart;
+			while (valEnd < html.size() && html[valEnd] >= '0' && html[valEnd] <= '9') {
+				valEnd++;
+			}
+			if (valStart == valEnd) return 0;
+			try {
+				return static_cast<size_t>(std::stoull(std::string(html.substr(valStart, valEnd - valStart))));
+			} catch (...) {
+				return 0;
+			}
+		}
+
+		bool parseDataObject(IDataObject* pDataObj, std::vector<std::string>& outIds) {
+			outIds.clear();
+
+			// Try CF_UNICODETEXT
+			FORMATETC fmtText = { CF_UNICODETEXT, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+			STGMEDIUM mediumText = { 0 };
+			if (SUCCEEDED(pDataObj->GetData(&fmtText, &mediumText))) {
+				if (mediumText.tymed == TYMED_HGLOBAL && mediumText.hGlobal) {
+					SIZE_T bytesSize = GlobalSize(mediumText.hGlobal);
+					// Reject payloads larger than the accepted maximum.
+					if (bytesSize > 0 && bytesSize <= MAX_DROP_PAYLOAD_BYTES) {
+						const wchar_t* pWStr = static_cast<const wchar_t*>(GlobalLock(mediumText.hGlobal));
+						if (pWStr) {
+							SIZE_T maxSize = bytesSize / sizeof(wchar_t);
+							SIZE_T size = 0;
+							while (size < maxSize && pWStr[size] != L'\0') {
+								size++;
+							}
+							std::wstring payload(pWStr, size);
+							GlobalUnlock(mediumText.hGlobal);
+
+							parseUnicodeText(payload, outIds);
+						}
+					}
+				}
+				ReleaseStgMedium(&mediumText);
+			}
+
+			// Try HTML Format
+			if (outIds.empty()) {
+				static UINT cfHtml = RegisterClipboardFormatA("HTML Format");
+				FORMATETC fmtHtml = { (CLIPFORMAT)cfHtml, nullptr, DVASPECT_CONTENT, -1, TYMED_HGLOBAL };
+				STGMEDIUM mediumHtml = { 0 };
+				if (SUCCEEDED(pDataObj->GetData(&fmtHtml, &mediumHtml))) {
+					if (mediumHtml.tymed == TYMED_HGLOBAL && mediumHtml.hGlobal) {
+						SIZE_T bytesSize = GlobalSize(mediumHtml.hGlobal);
+						// Reject payloads larger than the accepted maximum.
+						if (bytesSize > 0 && bytesSize <= MAX_DROP_PAYLOAD_BYTES) {
+							const char* pStr = static_cast<const char*>(GlobalLock(mediumHtml.hGlobal));
+							if (pStr) {
+								std::string payload(pStr, bytesSize);
+								GlobalUnlock(mediumHtml.hGlobal);
+
+								parseHtmlFormat(payload, outIds);
+							}
+						}
+					}
+					ReleaseStgMedium(&mediumHtml);
+				}
+			}
+
+			// De-duplicate and filter
+			if (!outIds.empty()) {
+				std::vector<std::string> uniqueIds;
+				for (const auto& id : outIds) {
+					if (std::find(uniqueIds.begin(), uniqueIds.end(), id) == uniqueIds.end()) {
+						uniqueIds.push_back(id);
+					}
+				}
+				outIds.clear();
+
+				const auto recordHandler = DataHandler::get() ? DataHandler::get()->recordHandler : nullptr;
+				if (recordHandler) {
+					for (const auto& id : uniqueIds) {
+						BaseObject* obj = recordHandler->getObjectByID(id.c_str());
+						if (isValidDropTarget(obj)) {
+							outIds.push_back(id);
+						}
+					}
+				}
+			}
+
+			return !outIds.empty();
+		}
+
+		void parseUnicodeText(std::wstring_view text, std::vector<std::string>& outIds) {
+			// Note: `from_wstring` is lossy but that should be irrelevant for ASCII IDs.
+			const std::string payload = se::string::from_wstring(text);
+			constexpr std::string_view prefix = "cs-object:";
+
+			size_t objectCount = 0;
+			std::string_view sv(payload);
+			size_t pos = 0;
+			while (pos < sv.size() && objectCount < MAX_DROP_OBJECTS) {
+				const size_t nextLine = sv.find_first_of("\r\n", pos);
+				std::string line = se::string::trim_copy(std::string(
+					sv.substr(pos, nextLine == std::string_view::npos ? std::string_view::npos : nextLine - pos)));
+
+				if (se::string::istarts_with(line, prefix)) {
+					std::string id = se::string::trim_copy(line.substr(prefix.size()));
+					if (!id.empty() && id.size() < MAX_EDITOR_ID_LENGTH) {
+						outIds.push_back(std::move(id));
+						objectCount++;
+					}
+				}
+
+				if (nextLine == std::string_view::npos) {
+					break;
+				}
+				pos = sv.find_first_not_of("\r\n", nextLine);
+			}
+		}
+
+		void parseHtmlFormat(std::string_view html, std::vector<std::string>& outIds) {
+			size_t startFrag = parseHeaderOffset(html, "StartFragment");
+			size_t endFrag = parseHeaderOffset(html, "EndFragment");
+			if (startFrag == 0 || endFrag == 0 || startFrag >= html.size() || endFrag > html.size() || startFrag >= endFrag) {
+				return;
+			}
+
+			std::string_view fragment(html.data() + startFrag, endFrag - startFrag);
+
+			constexpr std::string_view attrName = "data-cs-object";
+			constexpr std::string_view whitespace = " \t\r\n";
+
+			size_t objectCount = 0;
+			size_t pos = 0;
+			while (objectCount < MAX_DROP_OBJECTS) {
+				const size_t namePos = fragment.find(attrName, pos);
+				if (namePos == std::string_view::npos) {
+					break;
+				}
+
+				// Always advance past this occurrence for the next iteration, whatever
+				// the outcome of the parse attempt below.
+				size_t cursor = namePos + attrName.size();
+				pos = cursor;
+
+				// The attribute name must end here. Reject longer names that merely
+				// share the prefix (e.g. a tool-specific "data-cs-object-foo"); the
+				// next character has to be '=' or whitespace.
+				if (cursor < fragment.size() && fragment[cursor] != '=' && whitespace.find(fragment[cursor]) == std::string_view::npos) {
+					continue;
+				}
+
+				// Tolerate whitespace around '=', e.g. data-cs-object = "id".
+				cursor = fragment.find_first_not_of(whitespace, cursor);
+				if (cursor == std::string_view::npos || fragment[cursor] != '=') {
+					continue;
+				}
+				cursor = fragment.find_first_not_of(whitespace, cursor + 1);
+				if (cursor == std::string_view::npos) {
+					break;
+				}
+
+				// Accept either single or double quoted values.
+				const char quote = fragment[cursor];
+				if (quote != '"' && quote != '\'') {
+					continue;
+				}
+				const size_t valStart = cursor + 1;
+				const size_t valEnd = fragment.find(quote, valStart);
+				if (valEnd == std::string_view::npos) {
+					break;
+				}
+
+				std::string_view id = fragment.substr(valStart, valEnd - valStart);
+				size_t s = id.find_first_not_of(whitespace);
+				if (s != std::string_view::npos) {
+					size_t e = id.find_last_not_of(whitespace);
+					id = id.substr(s, e - s + 1);
+				} else {
+					id = std::string_view();
+				}
+
+				if (!id.empty() && id.size() < MAX_EDITOR_ID_LENGTH) {
+					outIds.push_back(std::string(id));
+					objectCount++;
+				}
+				pos = valEnd + 1;
+			}
+		}
+
+	public:
+		static RenderWindowDropTarget& get() {
+			static RenderWindowDropTarget instance;
+			return instance;
+		}
+
+		void setWindow(HWND hWnd) {
+			m_hWnd = hWnd;
+		}
+
+		// IUnknown methods
+		STDMETHODIMP QueryInterface(REFIID riid, void** ppvObject) override {
+			if (!ppvObject) return E_POINTER;
+			if (riid == __uuidof(IUnknown) || riid == __uuidof(IDropTarget)) {
+				*ppvObject = static_cast<IDropTarget*>(this);
+				AddRef();
+				return S_OK;
+			}
+			*ppvObject = nullptr;
+			return E_NOINTERFACE;
+		}
+
+		STDMETHODIMP_(ULONG) AddRef() override {
+			return InterlockedIncrement(&m_refCount);
+		}
+
+		STDMETHODIMP_(ULONG) Release() override {
+			return InterlockedDecrement(&m_refCount);
+		}
+
+		// IDropTarget methods
+		STDMETHODIMP DragEnter(IDataObject* pDataObj, DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) override {
+			m_cachedIds.clear();
+			m_dragAccepted = false;
+
+			if (!pdwEffect) return E_POINTER;
+
+			if (!(*pdwEffect & DROPEFFECT_COPY)) {
+				*pdwEffect = DROPEFFECT_NONE;
+				return S_OK;
+			}
+
+			if (parseDataObject(pDataObj, m_cachedIds)) {
+				m_dragAccepted = true;
+				*pdwEffect = DROPEFFECT_COPY;
+			} else {
+				*pdwEffect = DROPEFFECT_NONE;
+			}
+			return S_OK;
+		}
+
+		STDMETHODIMP DragOver(DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) override {
+			if (!pdwEffect) return E_POINTER;
+
+			if (m_dragAccepted && (*pdwEffect & DROPEFFECT_COPY)) {
+				*pdwEffect = DROPEFFECT_COPY;
+			} else {
+				*pdwEffect = DROPEFFECT_NONE;
+			}
+			return S_OK;
+		}
+
+		STDMETHODIMP DragLeave() override {
+			m_cachedIds.clear();
+			m_dragAccepted = false;
+			return S_OK;
+		}
+
+		STDMETHODIMP Drop(IDataObject* pDataObj, DWORD grfKeyState, POINTL pt, DWORD* pdwEffect) override {
+			if (!pdwEffect) return E_POINTER;
+
+			if (!(*pdwEffect & DROPEFFECT_COPY)) {
+				*pdwEffect = DROPEFFECT_NONE;
+				return S_OK;
+			}
+
+			std::vector<std::string> ids = m_cachedIds;
+			if (ids.empty()) {
+				parseDataObject(pDataObj, ids);
+			}
+
+			m_cachedIds.clear();
+			m_dragAccepted = false;
+
+			if (ids.empty()) {
+				*pdwEffect = DROPEFFECT_NONE;
+				return S_OK;
+			}
+
+			const auto recordHandler = DataHandler::get() ? DataHandler::get()->recordHandler : nullptr;
+			if (!recordHandler) {
+				*pdwEffect = DROPEFFECT_NONE;
+				return S_OK;
+			}
+
+			std::vector<PhysicalObject*> objects;
+			for (const auto& id : ids) {
+				BaseObject* obj = recordHandler->getObjectByID(id.c_str());
+				if (isValidDropTarget(obj)) {
+					objects.push_back(static_cast<PhysicalObject*>(obj));
+				}
+			}
+
+			if (objects.empty()) {
+				*pdwEffect = DROPEFFECT_NONE;
+				return S_OK;
+			}
+
+			auto* selection = SelectionData::get();
+			if (!selection) {
+				*pdwEffect = DROPEFFECT_NONE;
+				return S_OK;
+			}
+
+			// Reject the drop while native placement is unavailable. The engine would
+			// otherwise ignore our message and leave the staged base objects behind as
+			// invalid selection targets, so bail out before touching the selection.
+			if (!isNativePlacementAvailable()) {
+				*pdwEffect = DROPEFFECT_NONE;
+				return S_OK;
+			}
+
+			selection->clear(true);
+			for (PhysicalObject* obj : objects) {
+				selection->addReference(reinterpret_cast<Reference*>(obj), false);
+			}
+
+			POINT screenPt = { pt.x, pt.y };
+			::SendMessageA(m_hWnd, CustomWindowMessage::PlaceDroppedObjects, 0, reinterpret_cast<LPARAM>(&screenPt));
+
+			// The native handler skips objects it cannot place in the current context
+			// ("player" NPC, door/travel markers, exterior or duplicate north markers)
+			// and rebuilds the selection with only the references it actually created.
+			// Report success based on what was really placed.
+			*pdwEffect = (selection->numberOfTargets != 0) ? DROPEFFECT_COPY : DROPEFFECT_NONE;
+			return S_OK;
+		}
+	};
+
+	void PatchDialogProc_AfterInit(DialogProcContext& context) {
+		const HWND hWnd = context.getWindowHandle();
+
+		const HRESULT oleResult = OleInitialize(nullptr);
+		if (SUCCEEDED(oleResult)) {
+			g_oleInitialized = true;
+			RenderWindowDropTarget::get().setWindow(hWnd);
+			const HRESULT hr = RegisterDragDrop(hWnd, &RenderWindowDropTarget::get());
+			if (SUCCEEDED(hr)) {
+				g_registeredDropHwnd = hWnd;
+			}
+			else {
+				log::stream << "CSSE: RegisterDragDrop failed: HRESULT 0x" << std::hex << hr << std::dec << std::endl;
+			}
+		}
+		else {
+			log::stream << "CSSE: OLE initialization failed: HRESULT 0x" << std::hex << oleResult << std::dec << std::endl;
+		}
+	}
+
+	void PatchDialogProc_BeforeDestroy(DialogProcContext& context) {
+		const HWND hWnd = context.getWindowHandle();
+
+		if (g_registeredDropHwnd == hWnd) {
+			RevokeDragDrop(hWnd);
+			g_registeredDropHwnd = nullptr;
+		}
+		if (g_oleInitialized) {
+			OleUninitialize();
+			g_oleInitialized = false;
+		}
+	}
+
+	LRESULT CALLBACK PatchDialogProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+		DialogProcContext context(hWnd, msg, wParam, lParam, 0x45A3F0);
+
+		switch (msg) {
+		case WM_DESTROY:
+			PatchDialogProc_BeforeDestroy(context);
+			break;
+		case WM_MOUSEMOVE:
+			PatchDialogProc_BeforeMouseMove(context);
+			break;
+		case WM_MOUSEWHEEL:
+			PatchDialogProc_BeforeMouseWheel(context);
+			break;
+		case WM_LBUTTONDOWN:
+			PatchDialogProc_BeforeLMouseButtonDown(context);
+			break;
+		case WM_LBUTTONUP:
+			PatchDialogProc_BeforeLMouseButtonUp(context);
+			break;
+		case WM_LBUTTONDBLCLK:
+			PatchDialogProc_BeforeLMouseDoubleClick(context);
+			break;
+		case WM_RBUTTONDOWN:
+			PatchDialogProc_BeforeRMouseButtonDown(context);
+			break;
+		case WM_KEYDOWN:
+			PatchDialogProc_BeforeKeyDown(context);
+			break;
+		case CustomWindowMessage::SetCameraPosition:
+			PatchDialogProc_BeforeSetCameraPosition(context);
+			break;
+		case WM_TIMER:
+			PatchDialogProc_BeforeTimer(context);
+			break;
+		case WM_ENTERSIZEMOVE:
+			PatchDialogProc_BeforeEnterSizeMove(context);
+			break;
+		case WM_SIZE:
+			PatchDialogProc_BeforeSize(context);
+			break;
+		case WM_EXITSIZEMOVE:
+			PatchDialogProc_BeforeExitSizeMove(context);
+			break;
+		case WM_ERASEBKGND:
+			// The Render Window is drawn by DirectX. Letting Windows erase the dialog
+			// background exposes a white frame during exterior grid recentering.
+			if (darkmode::isActive()) {
+				RECT clientRect;
+				GetClientRect(hWnd, &clientRect);
+
+				const auto hdc = reinterpret_cast<HDC>(wParam);
+				SetDCBrushColor(hdc, darkmode::palette::workspace);
+				FillRect(hdc, &clientRect, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
+			}
+			return 1;
+		}
+
+		// Call original function, or return early if we already have a result.
+		if (context.hasResult()) {
+			return context.getResult();
+		}
+		else {
+			context.callOriginalFunction();
+		}
+
+		switch (msg) {
+		case WM_INITDIALOG:
+			PatchDialogProc_AfterInit(context);
+			break;
+		case WM_KEYDOWN:
+			PatchDialogProc_AfterKeyDown(context);
+			break;
+		case WM_KEYUP:
+			PatchDialogProc_AfterKeyUp(context);
+			break;
+		case WM_LBUTTONUP:
+			PatchDialogProc_AfterLMouseButtonUp(context);
+			break;
+		case WM_RBUTTONDOWN:
+			PatchDialogProc_AfterRMouseButtonDown(context);
+			break;
+		case WM_RBUTTONUP:
+			PatchDialogProc_AfterRMouseButtonUp(context);
+			break;
+		case CustomWindowMessage::RefreshLandscapeEditDisc:
+			PatchDialogProc_AfterRefreshLandDisc(context);
+			break;
+		}
+
+		return context.getResult();
+	}
+
+	//
+	//
+	//
+
+	void installPatches() {
+		using memory::genCallEnforced;
+		using memory::genCallUnprotected;
+		using memory::genJumpEnforced;
+		using memory::genJumpUnprotected;
+		using memory::genPushEnforced;
+		using memory::writeDoubleWordEnforced;
+		using memory::writePatchCodeUnprotected;
+		using memory::writeValueEnforced;
+
+		// Patch: Extend SceneGraphController structure.
+		static_assert(sizeof(SceneGraphController) < INT8_MAX);
+		genPushEnforced(0x4473FD, (BYTE)sizeof(SceneGraphController));
+		genJumpEnforced(0x403855, 0x449930, reinterpret_cast<DWORD>(SceneGraphController::initialize));
+
+		// Patch: Improve camera controls.
+		genJumpUnprotected(0x45E323, reinterpret_cast<DWORD>(Patch_ImproveCameraControls_EnterPanningMode_Wrapper), 0x7);
+		genJumpEnforced(0x40494E, 0x469C50, reinterpret_cast<DWORD>(Patch_ImproveCameraControls));
+
+		// Patch: Use world rotation values.
+		genJumpEnforced(0x403D41, 0x4652D0, reinterpret_cast<DWORD>(Patch_ReplaceRotationLogic));
+
+		// Patch: Improve multi-reference scaling.
+		genCallEnforced(0x45EE3A, 0x404949, reinterpret_cast<DWORD>(Patch_ReplaceScalingLogic));
+
+		// Patch: Apply landscape texture painting to all tiles in the edit radius.
+		genCallEnforced(0x45E055, 0x401398, reinterpret_cast<DWORD>(Patch_ResolveTexturePaintTarget));
+		genCallEnforced(0x45E0A6, 0x404903, reinterpret_cast<DWORD>(Patch_ApplyTextureWithRadius));
+		genCallEnforced(0x45EB5C, 0x401398, reinterpret_cast<DWORD>(Patch_ResolveTexturePaintTarget));
+		genCallEnforced(0x45EBAD, 0x404903, reinterpret_cast<DWORD>(Patch_ApplyTextureWithRadius));
+
+		// Patch: Iterative vertex color painting with strength + blend modes.
+		genCallEnforced(0x45D132, 0x401753, reinterpret_cast<DWORD>(Patch_PaintVertexColors));
+		genCallEnforced(0x45E00F, 0x401753, reinterpret_cast<DWORD>(Patch_PaintVertexColors));
+		genCallEnforced(0x45E7D3, 0x401753, reinterpret_cast<DWORD>(Patch_PaintVertexColors));
+		genCallEnforced(0x45EB16, 0x401753, reinterpret_cast<DWORD>(Patch_PaintVertexColors));
+
+		// Patch: Improve drag-move logic.
+		genJumpEnforced(0x401F4B, 0x464B70, reinterpret_cast<DWORD>(Patch_ReplaceDragMovementLogic));
+
+		// Patch: Improve drop-to-surface logic by ignoring particles and skinned geometry.
+		genCallEnforced(0x46687F, 0x403AD5, reinterpret_cast<DWORD>(Patch_FixDropToSurface_GetLowestZ));
+		genJumpEnforced(0x402CE8, 0x4665F0, reinterpret_cast<DWORD>(Patch_FixDropToSurface_GetLowVertices));
+		genCallEnforced(0x46697E, 0x5B35B0, reinterpret_cast<DWORD>(Patch_FixDropToSurface_PickObjects));
+
+		// Patch: Make clicking things near skinned objects not painful.
+		genJumpEnforced(0x404980, 0x463F30, reinterpret_cast<DWORD>(Patch_FixPickAgainstSkinnedObjects));
+
+		// Patch: Allow custom FOV.
+		genJumpEnforced(0x4028FB, 0x40BE60, reinterpret_cast<DWORD>(Patch_AllowCustomFOV));
+
+		// Patch: Allow custom multisamples.
+		genCallEnforced(0x58DCFD, 0x58ECC0, reinterpret_cast<DWORD>(Patch_AllowCustomMultisamples));
+		genCallEnforced(0x58EC30, 0x58ECC0, reinterpret_cast<DWORD>(Patch_AllowCustomMultisamples));
+
+		// Patch: Fix camera positioning around objects with too high of a bound radius.
+		genCallEnforced(0x45FCB8, 0x4015BE, reinterpret_cast<DWORD>(Patch_LimitCameraOrbitRadius));
+
+		// Patch: Custom marker toggling code.
+		writePatchCodeUnprotected(0x49E8CE, (BYTE*)PatchEditorMarkers_Setup, PatchEditorMarkers_Setup_Size);
+		genCallUnprotected(0x49E8CE + PatchEditorMarkers_Setup_Size, reinterpret_cast<DWORD>(PatchEditorMarkers), 0x49E8E9 - 0x49E8CE - PatchEditorMarkers_Setup_Size);
+		writePatchCodeUnprotected(0x49E932, (BYTE*)PatchEditorMarkers_Setup, PatchEditorMarkers_Setup_Size);
+		genCallUnprotected(0x49E932 + PatchEditorMarkers_Setup_Size, reinterpret_cast<DWORD>(PatchEditorMarkers), 0x49E94D - 0x49E932 - PatchEditorMarkers_Setup_Size);
+
+		// Patch: When hiding objects (Shift+C) in terrain editing mode (H), do not hide the terrain editing circle.
+		writeDoubleWordEnforced(0x45F166 + 0x2, 0x12C, 0x134);
+		writeDoubleWordEnforced(0x45F39C + 0x2, 0x12C, 0x134);
+		writeDoubleWordEnforced(0x45F719 + 0x2, 0x12C, 0x134);
+		genCallEnforced(0x45F4ED, 0x4015A0, reinterpret_cast<DWORD>(PatchFixMaterialPropertyColors));
+		genCallEnforced(0x45F626, 0x4015A0, reinterpret_cast<DWORD>(PatchAddBlankTexturingProperty));
+
+		// Prevent selecting hidden objects.
+		genJumpEnforced(0x403C92, 0x546750, reinterpret_cast<DWORD>(PatchPreventSelection));
+
+		// Patch: Add scale information to status window.
+		genCallEnforced(0x45C962, 0x404881, reinterpret_cast<DWORD>(Patch_ExtendReferenceStatusData));
+
+		// Patch: Extend Render Window message handling.
+		genJumpEnforced(0x4020EF, 0x45A3F0, reinterpret_cast<DWORD>(PatchDialogProc));
+
+		// Patch: Customize render window update rate.
+		const auto limitTimeInMS = (BYTE)std::floor(1.0f / float(settings.render_window.fps_limit) * 1000.0f);
+		writeValueEnforced<BYTE>(0x45BF58 + 0x1, 40u, limitTimeInMS);
+
+		// Patch: Extend the selection widget to a full NiNode on references.
+		genJumpEnforced(0x40235B, 0x540D50, &Reference::createSelectionWidget);
+
+		// Patch: Prevent selecting soft hidden objects
+		genCallEnforced(0x4682D4, 0x403C92, reinterpret_cast<DWORD>(Patch_SelectionBoxCheckReference));
+		genCallEnforced(0x468341, 0x403C92, reinterpret_cast<DWORD>(Patch_SelectionBoxCheckReference));
+	}
+}

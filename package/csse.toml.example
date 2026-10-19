@@ -1,0 +1,7 @@
+# Rename to csse.toml only if no existing config should be preserved.
+# CSSE writes its full defaults on the first enabled launch.
+enabled = true
+
+# Optional: configure the installed OpenMW folder to show its test button.
+# [openmw]
+# location = 'D:\Games\OpenMW'

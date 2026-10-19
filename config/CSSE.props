@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <OutDir>$(CSSERepositoryRoot)build\$(Configuration)\</OutDir>
+    <IntDir>$(CSSERepositoryRoot)build\obj\$(Configuration)\</IntDir>
+    <TargetName>CSSE</TargetName>
+    <CSSEBuildNumber Condition="'$(CSSEBuildNumber)' == ''">0</CSSEBuildNumber>
+    <CSSEBuildDate Condition="'$(CSSEBuildDate)' == ''">$([System.DateTime]::UtcNow.ToString('yyyyMMdd'))</CSSEBuildDate>
+    <CSSEDeployToEditor Condition="'$(CSSEDeployToEditor)' == ''">false</CSSEDeployToEditor>
+    <IncludePath>$(IntDir);$(ProjectDir);$(CSSERepositoryRoot)deps\fmt\include;$(CSSERepositoryRoot)deps\toml11\include;$(CSSERepositoryRoot)deps\DirectX8\include;$(IncludePath)</IncludePath>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>Use</PrecompiledHeader>
+      <PrecompiledHeaderFile>pch.h</PrecompiledHeaderFile>
+      <PrecompiledHeaderOutputFile>$(IntDir)CSSE.pch</PrecompiledHeaderOutputFile>
+      <ForcedIncludeFiles>pch.h;%(ForcedIncludeFiles)</ForcedIncludeFiles>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>CSSE_BUILD_NUMBER=$(CSSEBuildNumber);SE_USE_LUA=0;SE_IS_MWSE=0;SE_TARGETS_MW=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <TargetMachine>MachineX86</TargetMachine>
+      <ModuleDefinitionFile>$(ProjectDir)CSSE.def</ModuleDefinitionFile>
+      <AdditionalDependencies>msimg32.lib;comctl32.lib;dbghelp.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+    <ResourceCompile>
+      <Culture>0x0409</Culture>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(IntDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+  </ItemDefinitionGroup>
+</Project>

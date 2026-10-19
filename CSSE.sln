@@ -1,0 +1,24 @@
+﻿Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CSSE", "CSSE\CSSE.vcxproj", "{50562D0F-55B1-49EA-BDBE-D6922BE5957D}"
+EndProject
+Global
+    GlobalSection(SolutionConfigurationPlatforms) = preSolution
+        Debug|x86 = Debug|x86
+        Release|x86 = Release|x86
+    EndGlobalSection
+    GlobalSection(ProjectConfigurationPlatforms) = postSolution
+        {50562D0F-55B1-49EA-BDBE-D6922BE5957D}.Debug|x86.ActiveCfg = Debug|Win32
+        {50562D0F-55B1-49EA-BDBE-D6922BE5957D}.Debug|x86.Build.0 = Debug|Win32
+        {50562D0F-55B1-49EA-BDBE-D6922BE5957D}.Release|x86.ActiveCfg = Release|Win32
+        {50562D0F-55B1-49EA-BDBE-D6922BE5957D}.Release|x86.Build.0 = Release|Win32
+    EndGlobalSection
+    GlobalSection(SolutionProperties) = preSolution
+        HideSolutionNode = FALSE
+    EndGlobalSection
+    GlobalSection(SharedMSBuildProjectFiles) = preSolution
+        SharedSE\SharedSE.vcxitems*{50562d0f-55b1-49ea-bdbe-d6922be5957d}*SharedItemsImports = 4
+    EndGlobalSection
+EndGlobal

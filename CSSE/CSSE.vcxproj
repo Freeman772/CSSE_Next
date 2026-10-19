@@ -1,0 +1,269 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32"><Configuration>Debug</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{50562D0F-55B1-49EA-BDBE-D6922BE5957D}</ProjectGuid>
+    <Keyword>MFCDLLProj</Keyword>
+    <RootNamespace>CSSE</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+    <CSSERepositoryRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\'))</CSSERepositoryRoot>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <PlatformToolset>v143</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+    <UseOfMfc>Static</UseOfMfc>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="Shared">
+    <Import Project="..\SharedSE\SharedSE.vcxitems" Label="Shared" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="Exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+    <Import Project="..\config\CSSE.props" />
+    <Import Project="..\config\CSSE.User.props" Condition="Exists('..\config\CSSE.User.props')" />
+  </ImportGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'"><LinkIncremental>true</LinkIncremental></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'"><LinkIncremental>false</LinkIncremental></PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>CSSE_EXPORTS;WIN32;_WINDOWS;_DEBUG;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Midl><MkTypLibCompatible>false</MkTypLibCompatible><PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></Midl>
+    <ResourceCompile><PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
+    <ClCompile>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>CSSE_EXPORTS;WIN32;_WINDOWS;NDEBUG;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link><EnableCOMDATFolding>true</EnableCOMDATFolding><OptimizeReferences>true</OptimizeReferences></Link>
+    <Midl><MkTypLibCompatible>false</MkTypLibCompatible><PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></Midl>
+    <ResourceCompile><PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ResourceCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+	<ClCompile Include="CrashLoggerCSSE.cpp" />
+    <ClCompile Include="CDataBoundPropertyGridProperty.cpp" />
+    <ClCompile Include="CSAlchemy.cpp" />
+    <ClCompile Include="CSArmor.cpp" />
+    <ClCompile Include="CSBirthsign.cpp" />
+    <ClCompile Include="CSBodyPart.cpp" />
+    <ClCompile Include="CSBook.cpp" />
+    <ClCompile Include="CSCell.cpp" />
+    <ClCompile Include="CSClass.cpp" />
+    <ClCompile Include="CSLand.cpp" />
+    <ClCompile Include="CSContainer.cpp" />
+    <ClCompile Include="CSCreature.cpp" />
+    <ClCompile Include="CSDialogue.cpp" />
+    <ClCompile Include="CSDialogueInfo.cpp" />
+    <ClCompile Include="CSEffect.cpp" />
+    <ClCompile Include="CSEnchantment.cpp" />
+    <ClCompile Include="CSFaction.cpp" />
+    <ClCompile Include="CSGameSetting.cpp" />
+    <ClCompile Include="CSGlobalVariable.cpp" />
+    <ClCompile Include="CSIngredient.cpp" />
+    <ClCompile Include="CSLeveledCreature.cpp" />
+    <ClCompile Include="CSLeveledItem.cpp" />
+    <ClCompile Include="CSMagicEffect.cpp" />
+    <ClCompile Include="CSNPC.cpp" />
+    <ClCompile Include="CSObject.cpp" />
+    <ClCompile Include="CSRace.cpp" />
+    <ClCompile Include="CSSpell.cpp" />
+    <ClCompile Include="CSWeapon.cpp" />
+    <ClCompile Include="DarkMode.cpp" />
+    <ClCompile Include="DialogAboutCSSE.cpp" />
+    <ClCompile Include="IconOverride.cpp" />
+    <ClCompile Include="DialogActorAIWindow.cpp" />
+    <ClCompile Include="DialogCSSESettings.cpp" />
+    <ClCompile Include="DialogEditAlchemyObjectWindow.cpp" />
+    <ClCompile Include="DialogEditCreatureObjectWindow.cpp" />
+    <ClCompile Include="DialogEditEnchantmentObjectWindow.cpp" />
+    <ClCompile Include="DialogEditLeveledCreatureObjectWindow.cpp" />
+    <ClCompile Include="DialogEditLeveledItemObjectWindow.cpp" />
+    <ClCompile Include="DialogEditNPCObjectWindow.cpp" />
+    <ClCompile Include="DialogEditObjectWindow.cpp" />
+    <ClCompile Include="DialogEditSpellObjectWindow.cpp" />
+    <ClCompile Include="DialogLandscapeEditSettingsWindow.cpp" />
+    <ClCompile Include="DialogLayersWindow.cpp" />
+    <ClCompile Include="DialogPathGridWindow.cpp" />
+    <ClCompile Include="DialogPreviewWindow.cpp" />
+    <ClCompile Include="DialogProcContext.cpp" />
+    <ClCompile Include="DialogReferenceData.cpp" />
+    <ClCompile Include="DialogScriptEditorWindow.cpp" />
+    <ClCompile Include="DialogScriptListWindow.cpp" />
+    <ClCompile Include="DialogTextSearchWindow.cpp" />
+    <ClCompile Include="DialogUseReportWindow.cpp" />
+    <ClCompile Include="EditBasicExtended.cpp" />
+    <ClCompile Include="CSBaseObject.cpp" />
+    <ClCompile Include="CSDataHandler.cpp" />
+    <ClCompile Include="CSGameFile.cpp" />
+    <ClCompile Include="CSLight.cpp" />
+    <ClCompile Include="CSModelLoader.cpp" />
+    <ClCompile Include="CSPhysicalObject.cpp" />
+    <ClCompile Include="CSRecordHandler.cpp" />
+    <ClCompile Include="CSScript.cpp" />
+    <ClCompile Include="CSSE.cpp" />
+    <ClCompile Include="DialogCellWindow.cpp" />
+    <ClCompile Include="DialogDataFilesWindow.cpp" />
+    <ClCompile Include="DialogDialogueWindow.cpp" />
+    <ClCompile Include="DialogObjectWindow.cpp" />
+    <ClCompile Include="DialogRenderWindow.cpp" />
+    <ClCompile Include="DialogSearchAndReplaceWindow.cpp" />
+    <ClCompile Include="LogUtil.cpp" />
+    <ClCompile Include="MetadataUtil.cpp" />
+    <ClCompile Include="ModMetadata.cpp" />
+    <ClCompile Include="ObjectWindowTabData.cpp" />
+    <ClCompile Include="PathUtil.cpp" />
+    <ClCompile Include="pch.cpp">
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
+      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
+    </ClCompile>
+    <ClCompile Include="CSReference.cpp" />
+    <ClCompile Include="RenderWindowSceneGraphController.cpp" />
+    <ClCompile Include="RenderWindowSelectionData.cpp" />
+    <ClCompile Include="RenderWindowWidgets.cpp" />
+    <ClCompile Include="Settings.cpp" />
+    <ClCompile Include="TextureRenderer.cpp" />
+    <ClCompile Include="TomlUtil.cpp" />
+    <ClCompile Include="WindowMain.cpp" />
+    <ClCompile Include="WinUIUtil.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="CSSE.def" />
+    <None Include="res\comctl32v6.manifest" />
+    <None Include="res\CSSE.rc2" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="CDataBoundPropertyGridProperty.h" />
+    <ClInclude Include="CSAlchemy.h" />
+    <ClInclude Include="CSArchive.h" />
+    <ClInclude Include="CSBirthsign.h" />
+    <ClInclude Include="CSClass.h" />
+    <ClInclude Include="CSDoor.h" />
+    <ClInclude Include="CSGlobalVariable.h" />
+    <ClInclude Include="CSLand.h" />
+    <ClInclude Include="CSMagicEffect.h" />
+    <ClInclude Include="CSRace.h" />
+    <ClInclude Include="CSRegion.h" />
+    <ClInclude Include="CSSE.h" />
+    <ClInclude Include="DarkMode.h" />
+    <ClInclude Include="DialogAboutCSSE.h" />
+    <ClInclude Include="IconOverride.h" />
+    <ClInclude Include="DialogActorAIWindow.h" />
+    <ClInclude Include="DialogCSSESettings.h" />
+    <ClInclude Include="DialogLayersWindow.h" />
+    <ClInclude Include="DialogPathGridWindow.h" />
+    <ClInclude Include="DialogProcContext.h" />
+    <ClInclude Include="DialogUseReportWindow.h" />
+    <ClInclude Include="CSFile.h" />
+    <ClInclude Include="framework.h" />
+    <ClInclude Include="MetadataUtil.h" />
+    <ClInclude Include="ModMetadata.h" />
+    <ClInclude Include="PathUtil.h" />
+    <ClInclude Include="pch.h" />
+    <ClInclude Include="Resource.h" />
+    <ClInclude Include="targetver.h" />
+    <ClInclude Include="CSActor.h" />
+    <ClInclude Include="CSAIConfig.h" />
+    <ClInclude Include="CSAnimatedObject.h" />
+    <ClInclude Include="CSApparatus.h" />
+    <ClInclude Include="CSArmor.h" />
+    <ClInclude Include="CSBodyPart.h" />
+    <ClInclude Include="CSBook.h" />
+    <ClInclude Include="CSCell.h" />
+    <ClInclude Include="CSClothing.h" />
+    <ClInclude Include="CSContainer.h" />
+    <ClInclude Include="CSCreature.h" />
+    <ClInclude Include="CSDataHandler.h" />
+    <ClInclude Include="CSDefines.h" />
+    <ClInclude Include="CSDialogue.h" />
+    <ClInclude Include="CSDialogueInfo.h" />
+    <ClInclude Include="CSEffect.h" />
+    <ClInclude Include="CSEnchantment.h" />
+    <ClInclude Include="CSFaction.h" />
+    <ClInclude Include="CSGameFile.h" />
+    <ClInclude Include="CSGameSetting.h" />
+    <ClInclude Include="CSIngredient.h" />
+    <ClInclude Include="CSLandTexture.h" />
+    <ClInclude Include="CSLeveledCreature.h" />
+    <ClInclude Include="CSLeveledItem.h" />
+    <ClInclude Include="CSLeveledList.h" />
+    <ClInclude Include="CSLight.h" />
+    <ClInclude Include="CSLockpick.h" />
+    <ClInclude Include="CSModelLoader.h" />
+    <ClInclude Include="CSNPC.h" />
+    <ClInclude Include="CSObject.h" />
+    <ClInclude Include="CSPhysicalObject.h" />
+    <ClInclude Include="CSProbe.h" />
+    <ClInclude Include="CSRecordHandler.h" />
+    <ClInclude Include="CSReference.h" />
+    <ClInclude Include="CSRepairTool.h" />
+    <ClInclude Include="CSScript.h" />
+    <ClInclude Include="CSSkill.h" />
+    <ClInclude Include="CSSound.h" />
+    <ClInclude Include="CSSpell.h" />
+    <ClInclude Include="CSSpellList.h" />
+    <ClInclude Include="CSStatic.h" />
+    <ClInclude Include="CSWeapon.h" />
+    <ClInclude Include="CSWearablePart.h" />
+    <ClInclude Include="DialogCellWindow.h" />
+    <ClInclude Include="DialogDataFilesWindow.h" />
+    <ClInclude Include="DialogDialogueWindow.h" />
+    <ClInclude Include="DialogEditAlchemyObjectWindow.h" />
+    <ClInclude Include="DialogEditCreatureObjectWindow.h" />
+    <ClInclude Include="DialogEditEnchantmentObjectWindow.h" />
+    <ClInclude Include="DialogEditLeveledCreatureObjectWindow.h" />
+    <ClInclude Include="DialogEditLeveledItemObjectWindow.h" />
+    <ClInclude Include="DialogEditNPCObjectWindow.h" />
+    <ClInclude Include="DialogEditObjectWindow.h" />
+    <ClInclude Include="DialogEditSpellObjectWindow.h" />
+    <ClInclude Include="DialogLandscapeEditSettingsWindow.h" />
+    <ClInclude Include="DialogObjectWindow.h" />
+    <ClInclude Include="DialogPreviewWindow.h" />
+    <ClInclude Include="DialogReferenceData.h" />
+    <ClInclude Include="DialogRenderWindow.h" />
+    <ClInclude Include="DialogScriptEditorWindow.h" />
+    <ClInclude Include="DialogScriptListWindow.h" />
+    <ClInclude Include="DialogSearchAndReplaceWindow.h" />
+    <ClInclude Include="DialogTextSearchWindow.h" />
+    <ClInclude Include="EditBasicExtended.h" />
+    <ClInclude Include="CSBaseObject.h" />
+    <ClInclude Include="LogUtil.h" />
+    <ClInclude Include="ObjectWindowTabData.h" />
+    <ClInclude Include="RenderWindowSceneGraphController.h" />
+    <ClInclude Include="RenderWindowSelectionData.h" />
+    <ClInclude Include="RenderWindowWidgets.h" />
+    <ClInclude Include="Settings.h" />
+    <ClInclude Include="TextureRenderer.h" />
+    <ClInclude Include="TomlUtil.h" />
+    <ClInclude Include="WindowMain.h" />
+    <ClInclude Include="WinUIUtil.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="CSSE.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="layer_toolbar.bmp" />
+    <Image Include="main_toolbar.bmp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+    <Import Project="..\config\CSSE.targets" />
+  </ImportGroup>
+</Project>

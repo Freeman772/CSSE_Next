@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <Target Name="ValidateCSSEConfiguration" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Platform)' != 'Win32'" Text="CSSE supports only Win32 (x86). Build CSSE.sln with /p:Platform=x86, or CSSE.vcxproj with /p:Platform=Win32." />
+    <Error Condition="!Exists('$(VCToolsInstallDir)atlmfc\include\afxwin.h')" Text="Install the C++ MFC for latest build tools (x86 and x64) component for the selected MSVC toolset." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(CSSEBuildNumber)', '^\d+$'))" Text="CSSEBuildNumber must contain decimal digits only." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(CSSEBuildDate)', '^\d{8}$'))" Text="CSSEBuildDate must use YYYYMMDD format." />
+  </Target>
+  <Target Name="GenerateCSSEBuildDateHeader" BeforeTargets="ClCompile">
+    <MakeDir Directories="$(IntDir)" />
+    <WriteLinesToFile File="$(IntDir)BuildDate.h" Lines="#pragma once%0A#define CSSE_BUILD_DATE $(CSSEBuildDate)" Overwrite="true" WriteOnlyWhenDifferent="true" Encoding="ASCII" />
+    <ItemGroup>
+      <FileWrites Include="$(IntDir)BuildDate.h" />
+    </ItemGroup>
+  </Target>
+  <Target Name="DeployCSSEToEditor" AfterTargets="Build" Condition="'$(CSSEDeployToEditor)' == 'true'">
+    <Error Condition="'$(EditorDir)' == ''" Text="Set EditorDir before enabling CSSEDeployToEditor." />
+    <Error Condition="!Exists('$(EditorDir)\TES Construction Set.exe')" Text="EditorDir must contain TES Construction Set.exe. Close the editor before deploying." />
+    <ItemGroup>
+      <CSSEDeploymentFile Include="$(TargetPath)" />
+      <CSSEDeploymentFile Include="$(OutDir)$(TargetName).pdb" Condition="Exists('$(OutDir)$(TargetName).pdb')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(CSSEDeploymentFile)" DestinationFolder="$(EditorDir)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

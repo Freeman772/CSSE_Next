@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <!-- Copy to config/CSSE.User.props to enable optional local DLL/PDB deployment. -->
+    <EditorDir>D:\Games\Morrowind</EditorDir>
+    <CSSEDeployToEditor>true</CSSEDeployToEditor>
+  </PropertyGroup>
+</Project>
