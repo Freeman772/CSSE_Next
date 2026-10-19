@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|Win32"><Configuration>Debug</Configuration><Platform>Win32</Platform></ProjectConfiguration>
     <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
@@ -19,9 +18,6 @@
     <CharacterSet>MultiByte</CharacterSet>
     <UseOfMfc>Static</UseOfMfc>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" Label="Configuration">
-    <UseDebugLibraries>true</UseDebugLibraries>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'" Label="Configuration">
     <UseDebugLibraries>false</UseDebugLibraries>
     <WholeProgramOptimization>true</WholeProgramOptimization>
@@ -36,16 +32,7 @@
     <Import Project="..\config\CSSE.props" />
     <Import Project="..\config\CSSE.User.props" Condition="Exists('..\config\CSSE.User.props')" />
   </ImportGroup>
-  <PropertyGroup Condition="'$(Configuration)' == 'Debug'"><LinkIncremental>true</LinkIncremental></PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)' == 'Release'"><LinkIncremental>false</LinkIncremental></PropertyGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Debug'">
-    <ClCompile>
-      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
-      <PreprocessorDefinitions>CSSE_EXPORTS;WIN32;_WINDOWS;_DEBUG;_USRDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-    </ClCompile>
-    <Midl><MkTypLibCompatible>false</MkTypLibCompatible><PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></Midl>
-    <ResourceCompile><PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ResourceCompile>
-  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
     <ClCompile>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
@@ -58,6 +45,7 @@
     <ResourceCompile><PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions></ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="PluginLoadOrder.cpp" />
 	<ClCompile Include="CrashLoggerCSSE.cpp" />
     <ClCompile Include="CDataBoundPropertyGridProperty.cpp" />
     <ClCompile Include="CSAlchemy.cpp" />
@@ -131,7 +119,6 @@
     <ClCompile Include="ObjectWindowTabData.cpp" />
     <ClCompile Include="PathUtil.cpp" />
     <ClCompile Include="pch.cpp">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">Create</PrecompiledHeader>
     </ClCompile>
     <ClCompile Include="CSReference.cpp" />
@@ -162,6 +149,7 @@
     <ClInclude Include="CSRace.h" />
     <ClInclude Include="CSRegion.h" />
     <ClInclude Include="CSSE.h" />
+    <ClInclude Include="PluginLoadOrder.h" />
     <ClInclude Include="DarkMode.h" />
     <ClInclude Include="DialogAboutCSSE.h" />
     <ClInclude Include="IconOverride.h" />

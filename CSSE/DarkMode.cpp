@@ -2337,7 +2337,7 @@ namespace se::cs::darkmode {
 	}
 
 	void remapToolbarImages(HWND hWndToolbar, HINSTANCE hImageInstance, UINT bitmapId, int imageWidth, int imageHeight) {
-		if (!active || hWndToolbar == nullptr) {
+		if (hWndToolbar == nullptr) {
 			return;
 		}
 
@@ -2369,6 +2369,7 @@ namespace se::cs::darkmode {
 
 		const auto imageList = buildImageList(bitmap, imageWidth, imageHeight, imageCount, 0, hasAlpha, RGB(192, 192, 192));
 		DeleteObject(bitmap);
+		if (!imageList) { return; }
 
 		const auto previous = reinterpret_cast<HIMAGELIST>(SendMessageA(hWndToolbar, TB_SETIMAGELIST, 0, reinterpret_cast<LPARAM>(imageList)));
 		if (previous) {
@@ -2380,7 +2381,20 @@ namespace se::cs::darkmode {
 	// Initialization.
 	//
 
+	bool initializeCommonControls() {
+		static const bool ready = [] {
+			if (!activateCommonControlsV6()) { return false; }
+			resolveImageListV6();
+			return true;
+		}();
+		return ready;
+	}
+
 	void initialize() {
+		if (!initializeCommonControls()) {
+			log::stream << "CSSE: could not activate comctl32 v6." << std::endl;
+			return;
+		}
 		if (!resolveWantsDarkMode()) {
 			return;
 		}
@@ -2396,14 +2410,6 @@ namespace se::cs::darkmode {
 			return;
 		}
 
-		if (!activateCommonControlsV6()) {
-			log::stream << "Dark mode: disabled, could not activate comctl32 v6." << std::endl;
-			return;
-		}
-
-		// Resolve the v6 image-list entry points now that its activation context
-		// is active, so alpha icon strips composite correctly.
-		resolveImageListV6();
 
 		if (!loadAndEnableDarkModeAPIs(buildNumber)) {
 			log::stream << "Dark mode: disabled, uxtheme dark mode exports unavailable." << std::endl;

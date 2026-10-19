@@ -5,3 +5,6 @@ enabled = true
 # Optional: configure the installed OpenMW folder to show its test button.
 # [openmw]
 # location = 'D:\Games\OpenMW'
+
+[color_theme]
+mode = "dark"

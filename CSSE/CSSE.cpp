@@ -20,6 +20,7 @@
 
 #include "DialogActorAIWindow.h"
 #include "DialogCellWindow.h"
+#include "DialogDataFilesWindow.h"
 #include "DialogLayersWindow.h"
 #include "DialogDialogueWindow.h"
 #include "DialogEditObjectWindow.h"
@@ -402,6 +403,7 @@ namespace se::cs {
 			// Dark mode must be set up before WinMain creates any window.
 			darkmode::initialize();
 			iconoverride::initialize();
+			dialog::data_files_window::installPatches();
 
 			const auto winMain = reinterpret_cast<int(__stdcall*)(HINSTANCE, HINSTANCE, LPSTR, int)>(0x4049B7);
 #ifdef _DEBUG

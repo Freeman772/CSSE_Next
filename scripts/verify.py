@@ -5,6 +5,7 @@ Uses only Python's standard library. This does not replace a Windows build.
 """
 
 import argparse
+import json
 from pathlib import Path
 import re
 import struct
@@ -64,12 +65,23 @@ def verify_sources():
 
     # Resource filenames are resolved case-insensitively by the Windows SDK.
     resource = (ROOT / "CSSE/CSSE.rc").read_text(encoding="utf-16")
+    resource += (ROOT / "CSSE/res/CSSE.rc2").read_text(encoding="utf-16")
+    resource += (ROOT / "CSSE/res/icons.rc2").read_text(encoding="utf-8")
     files = {p.relative_to(ROOT / "CSSE").as_posix().lower() for p in (ROOT / "CSSE").rglob("*") if p.is_file()}
-    for name in re.findall(r'^\s*\w+\s+(?:BITMAP|ICON|MANIFEST|RCDATA)\s+"([^\"]+)"', resource, re.M):
+    for name in re.findall(r'^\s*(?:\w+|"[^\"]+")\s+(?:BITMAP|ICON|MANIFEST|RCDATA|24)\s+"([^\"]+)"', resource, re.M):
         require(name.replace("\\\\", "/").replace("\\", "/").lower() in files, f"Missing resource: {name}")
-    icons = list((ROOT / "package/Data Files/CSSE/icons/dark").glob("*.png"))
-    require(bool(icons), "Missing CSSE dark-theme icons")
-    print(f"Source inputs OK: {counts['CSSE']} CSSE + {counts['SharedSE']} shared C++ units; {len(icons)} icons.")
+    icons = json.loads((ROOT / "CSSE/res/icons/catalog.json").read_text())
+    for icon in icons:
+        name = f"CSSE_ICON_{icon['theme'].upper()}_{icon['name'].upper()}"
+        require('"' + name + '" RCDATA' in resource, f"Icon is not linked into the DLL: {name}")
+        path = ROOT / "CSSE/res/icons" / icon['theme'] / (icon['name'] + '.png')
+        data = path.read_bytes()
+        require(data[:8] == b'\x89PNG\r\n\x1a\n' and struct.unpack_from('>II', data, 16) == (icon['width'], icon['height']), f"Invalid icon dimensions: {path}")
+    require({icon['theme'] for icon in icons} == {'dark', 'light'}, 'Both theme resource sets must be present')
+    require(not (ROOT / 'package/Data Files').exists(), 'Runtime icons must be embedded, not packaged as loose Data Files')
+    configurations = [e.get('Include') for e in project.findall('.//m:ProjectConfiguration', NS)]
+    require(configurations == ['Release|Win32'], 'Only Release must be exposed as a build configuration')
+    print(f"Source inputs OK: {counts['CSSE']} CSSE + {counts['SharedSE']} shared C++ units; {len(icons)} embedded icon resources; Release only.")
 
 
 def verify_binary(path):
@@ -116,6 +128,37 @@ def verify_binary(path):
     require(not forbidden, f"Unexpected runtime dependencies: {', '.join(forbidden)}")
     print(f"PE OK: x86 DLL; {len(imports)} system imports; no MWSE/Lua/.NET or dynamic MFC/MSVC runtime imports.")
     print("Imports: " + ", ".join(sorted(imports)))
+
+    # Check actual .rsrc payloads as well as their source RC declarations.
+    resource_rva, _ = struct.unpack_from('<II', data, optional + 96 + 2 * 8)
+    require(bool(resource_rva), 'The DLL contains no resources')
+    resource_base = offset(resource_rva)
+    embedded = {}
+
+    def visit(relative, names):
+        base = resource_base + relative
+        named, numbered = struct.unpack_from('<HH', data, base + 12)
+        for i in range(named + numbered):
+            name, target = struct.unpack_from('<II', data, base + 16 + i * 8)
+            if name & 0x80000000:
+                pos = resource_base + (name & 0x7fffffff)
+                length = struct.unpack_from('<H', data, pos)[0]
+                name = data[pos+2:pos+2+length*2].decode('utf-16le')
+            path = names + [name]
+            if target & 0x80000000:
+                require(len(path) <= 3, 'Invalid resource-directory nesting')
+                visit(target & 0x7fffffff, path)
+            elif len(path) == 3 and path[0] == 10 and isinstance(path[1], str) and path[1].startswith('CSSE_ICON_'):
+                rva, size = struct.unpack_from('<II', data, resource_base + target)
+                embedded[path[1]] = data[offset(rva):offset(rva)+size]
+
+    visit(0, [])
+    catalog = json.loads((ROOT / 'CSSE/res/icons/catalog.json').read_text())
+    for icon in catalog:
+        name = f"CSSE_ICON_{icon['theme'].upper()}_{icon['name'].upper()}"
+        original = (ROOT / 'CSSE/res/icons' / icon['theme'] / (icon['name'] + '.png')).read_bytes()
+        require(embedded.get(name) == original, f'DLL is missing the expected embedded PNG: {name}')
+    print(f'Resources OK: all {len(catalog)} PNGs are embedded in CSSE.dll with matching bytes.')
 
 
 def main():

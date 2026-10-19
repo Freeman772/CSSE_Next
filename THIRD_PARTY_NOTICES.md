@@ -16,8 +16,9 @@ they are not downloaded or updated during builds. The fmt license text
 was copied verbatim from its supplied format.h header. The versioned Windows
 SDK and MFC build components come from the developer's Visual Studio install.
 
-The distributed icon PNGs are copied unchanged from the supplied
-`misc/package/Data Files/MWSE/core/csse/icons` tree. They retain their
-original attribution and distribution context within the source project.
+The icon SVGs, PNGs and drawing geometry in scripts/generate-icons.py are
+original artwork authored for this standalone update and distributed with
+this GPL v2 project. They replace the loose icons from the supplied archive.
+No stock icon pack or third-party icon font is bundled.
 TES Construction Set, Morrowind, MGE XE, MWSE runtime files and game data
 are not bundled in this repository or in the runtime package.

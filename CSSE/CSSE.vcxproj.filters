@@ -66,6 +66,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="PluginLoadOrder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CSSE.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -405,6 +408,9 @@
     </ClInclude>
     <ClInclude Include="DialogLandscapeEditSettingsWindow.h">
       <Filter>Header Files\UI\Dialog</Filter>
+    </ClInclude>
+    <ClInclude Include="PluginLoadOrder.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSSE.h">
       <Filter>Header Files</Filter>

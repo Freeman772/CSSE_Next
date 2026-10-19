@@ -14,13 +14,9 @@ concurrency:
 
 jobs:
   build:
-    name: ${{ matrix.configuration }} / Win32
+    name: Release / Win32
     runs-on: windows-2022
     timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        configuration: [Debug, Release]
     defaults:
       run:
         shell: pwsh
@@ -33,19 +29,22 @@ jobs:
       - name: Verify standalone sources
         run: python scripts/verify.py
 
+      - name: Test load-order rules and rollback
+        run: ./scripts/test-order.ps1
+
       - name: Build CSSE only
-        run: ./scripts/build.ps1 -Configuration '${{ matrix.configuration }}' -BuildNumber '${{ github.run_number }}'
+        run: ./scripts/build.ps1 -Configuration Release -BuildNumber '${{ github.run_number }}'
 
       - name: Verify x86 DLL and runtime imports
-        run: python scripts/verify.py --binary 'build/${{ matrix.configuration }}/CSSE.dll'
+        run: python scripts/verify.py --binary build/Release/CSSE.dll
 
       - name: Package DLL, resources and separate symbols
-        run: ./scripts/package.ps1 -Configuration '${{ matrix.configuration }}'
+        run: ./scripts/package.ps1 -Configuration Release
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: CSSE-${{ matrix.configuration }}-Win32
-          path: dist/${{ matrix.configuration }}/*
+          name: CSSE-Release-Win32
+          path: dist/Release/*
           if-no-files-found: error
           retention-days: 30

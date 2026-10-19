@@ -1,18 +1,14 @@
 #pragma once
 
 namespace se::cs::iconoverride {
-	// Loads a loose-file replacement for a bitmap resource as a 32bpp DIB
-	// section, or nullptr when none exists. outHasAlpha reports a PNG source
-	// (premultiplied alpha); BMP sources keep their mask-color convention.
+	// Load a DLL-embedded PNG as a premultiplied 32bpp DIB, or nullptr if the
+	// original resource has no replacement. No loose asset files are read.
 	HBITMAP loadBitmapOverride(HINSTANCE hInstance, UINT resourceId, bool& outHasAlpha);
 
-	// True when any Data Files check mark icon has an authored override, which
-	// disables the black-stroke recolor hack in DarkMode.
+	// Both original Data Files checkbox glyphs have embedded replacements.
 	bool hasDataFilesCheckOverrides();
 
-	// Redirects the CS import table so icons and bitmaps can be overridden by
-	// loose files under Data Files\CSSE\icons\dark. Must run after
-	// darkmode::initialize() and before WinMain; no-op when dark mode is
-	// inactive, keeping light mode byte-identical to vanilla.
+	// Redirect CS image imports to the embedded dark/light resource set.
+	// Run after darkmode::initialize() and before the original WinMain.
 	void initialize();
 }

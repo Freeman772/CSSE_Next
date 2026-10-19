@@ -608,6 +608,11 @@ namespace se::cs {
 		render_window = toml::find_or(v, "render_window", render_window);
 		landscape_window = toml::find_or(v, "landscape_window", landscape_window);
 		color_theme = toml::find_or(v, "color_theme", color_theme);
+		// Older standalone builds wrote "auto" as their untouched default.
+		// Migrate that default once; preserve an explicit light/dark choice.
+		if (toml::find_or(v, "standalone_ui_defaults", 0) < 2 && color_theme.mode == "auto") {
+			color_theme.mode = "dark";
+		}
 		quickstart = toml::find_or(v, "quickstart", quickstart);
 		script_editor = toml::find_or(v, "script_editor", script_editor);
 		text_search = toml::find_or(v, "text_search", text_search);
@@ -621,6 +626,7 @@ namespace se::cs {
 		return toml::value(
 			{
 				{ "title", "Construction Set Extender" },
+				{ "standalone_ui_defaults", 2 },
 				{ "enabled", enabled },
 				{ "dialogue_window", dialogue_window },
 				{ "object_window", object_window },

@@ -3,15 +3,10 @@
 #include "DarkMode.h"
 #include "LogUtil.h"
 #include "MemoryUtil.h"
-#include "PathUtil.h"
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
 namespace se::cs::iconoverride {
-	namespace fs = std::filesystem;
-
-	static bool overridesAvailable = false;
-	static fs::path overrideDirectory;
 
 	// Original import targets, saved before the IAT slots are redirected.
 	static decltype(&LoadIconA) realLoadIconA = nullptr;
@@ -27,9 +22,7 @@ namespace se::cs::iconoverride {
 		const char* name;
 	};
 
-	// Friendly file names for the CS exe resources that reach the hooks below.
-	// scripts/extract_cs_icons.py extracts the original art as templates under
-	// these names; csse_icon_overrides.md documents the required dimensions.
+	// Stable names for the original CS resources, supplied by PNG RCDATA in this DLL.
 	static constexpr NamedResource exeResources[] = {
 		// Toolbar strips, 16x16 cells, silver RGB(192,192,192) keyed.
 		{ 152, Kind::bitmap, "toolbar_main" },		// Unused while PatchReplaceToolbarBitmap supplies CSSE's strip.
@@ -81,41 +74,27 @@ namespace se::cs::iconoverride {
 			// Unmapped exe resources stay overridable by raw id.
 			return (kind == Kind::bitmap ? "bitmap_" : "icon_") + std::to_string(resourceId);
 		}
-		if (hInstance == reinterpret_cast<HINSTANCE>(&__ImageBase) && kind == Kind::bitmap && resourceId == IDB_MAIN_TOOLBAR) {
-			// CSSE's own replacement strip; see PatchReplaceToolbarBitmap.
-			return "toolbar_main";
+		if (hInstance == reinterpret_cast<HINSTANCE>(&__ImageBase) && kind == Kind::bitmap) {
+			if (resourceId == IDB_MAIN_TOOLBAR) { return "toolbar_main"; }
+			if (resourceId == IDB_TOOLBAR_STRIP) { return "toolbar_layers"; }
 		}
 		return {};
 	}
 
-	static std::optional<fs::path> findOverrideFile(HINSTANCE hInstance, UINT resourceId, Kind kind) {
-		if (!overridesAvailable) {
-			return {};
-		}
-
+	static std::string findEmbeddedResource(HINSTANCE hInstance, UINT resourceId, Kind kind) {
 		const auto name = getOverrideName(hInstance, resourceId, kind);
-		if (name.empty()) {
-			return {};
+		if (name.empty()) { return {}; }
+		std::string resource = darkmode::isActive() ? "CSSE_ICON_DARK_" : "CSSE_ICON_LIGHT_";
+		for (const auto c : name) {
+			resource += c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
 		}
-
-		const char* extensions[] = { ".png", kind == Kind::bitmap ? ".bmp" : ".ico" };
-		for (const auto extension : extensions) {
-			auto file = overrideDirectory / (name + extension);
-			std::error_code ec;
-			if (fs::is_regular_file(file, ec)) {
-				return file;
-			}
-		}
-		return {};
+		return FindResourceA(reinterpret_cast<HINSTANCE>(&__ImageBase), resource.c_str(), RT_RCDATA) ? resource : std::string{};
 	}
 
-	// Each file is logged once on first use so artists can confirm pickup
-	// (or load failures) in csse.log.
-	static void logResult(const fs::path& file, bool loaded) {
+	static void logResult(const std::string& resource, bool loaded) {
 		static std::set<std::string> logged;
-		const auto name = file.filename().string();
-		if (logged.insert(name).second) {
-			log::stream << "Icon override: " << (loaded ? "applied " : "failed to load ") << name << "." << std::endl;
+		if (logged.insert(resource).second) {
+			log::stream << "Embedded icon: " << (loaded ? "loaded " : "failed ") << resource << "." << std::endl;
 		}
 	}
 
@@ -147,54 +126,64 @@ namespace se::cs::iconoverride {
 		return CreateDIBSection(nullptr, &info, DIB_RGB_COLORS, bits, nullptr, 0);
 	}
 
-	// Loads a PNG as a 32bpp premultiplied-alpha DIB section, the format
-	// comctl32 v6 image lists composite with per-pixel alpha.
-	static HBITMAP loadPngAsDib(const fs::path& file) {
-		if (!ensureGdiplus()) {
-			return nullptr;
+	// GDI+ requires the stream to outlive the image. The stream owns a copy of
+	// the resource bytes, and releases that memory after the image is destroyed.
+	class ResourceImage {
+	public:
+		explicit ResourceImage(const std::string& name) {
+			if (!ensureGdiplus()) { return; }
+			const auto module = reinterpret_cast<HINSTANCE>(&__ImageBase);
+			const auto resource = FindResourceA(module, name.c_str(), RT_RCDATA);
+			if (!resource) { return; }
+			const auto size = SizeofResource(module, resource);
+			const auto source = LockResource(LoadResource(module, resource));
+			if (!source || !size) { return; }
+			const auto memory = GlobalAlloc(GMEM_MOVEABLE, size);
+			if (!memory) { return; }
+			const auto bytes = GlobalLock(memory);
+			if (!bytes) { GlobalFree(memory); return; }
+			memcpy(bytes, source, size);
+			GlobalUnlock(memory);
+			if (FAILED(CreateStreamOnHGlobal(memory, TRUE, &m_Stream))) {
+				GlobalFree(memory); return;
+			}
+			m_Image.reset(Gdiplus::Bitmap::FromStream(m_Stream, FALSE));
+			if (m_Image && m_Image->GetLastStatus() != Gdiplus::Ok) { m_Image.reset(); }
 		}
+		~ResourceImage() { m_Image.reset(); if (m_Stream) { m_Stream->Release(); } }
+		Gdiplus::Bitmap* get() const { return m_Image.get(); }
+	private:
+		IStream* m_Stream = nullptr;
+		std::unique_ptr<Gdiplus::Bitmap> m_Image;
+	};
 
-		Gdiplus::Bitmap source(file.c_str());
-		if (source.GetLastStatus() != Gdiplus::Ok) {
-			return nullptr;
-		}
-
-		const int width = source.GetWidth();
-		const int height = source.GetHeight();
+	static HBITMAP loadPngAsDib(const std::string& resource) {
+		ResourceImage image(resource);
+		const auto source = image.get();
+		if (!source) { return nullptr; }
+		const int width = source->GetWidth();
+		const int height = source->GetHeight();
 		void* bits = nullptr;
 		const auto dib = createDibSection32(width, height, &bits);
-		if (dib == nullptr) {
-			return nullptr;
-		}
-
+		if (!dib) { return nullptr; }
 		Gdiplus::Rect rect(0, 0, width, height);
 		Gdiplus::BitmapData locked = {};
-		if (source.LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppPARGB, &locked) != Gdiplus::Ok) {
-			DeleteObject(dib);
-			return nullptr;
+		if (source->LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppPARGB, &locked) != Gdiplus::Ok) {
+			DeleteObject(dib); return nullptr;
 		}
 		for (int y = 0; y < height; ++y) {
 			memcpy(static_cast<BYTE*>(bits) + y * width * 4, static_cast<const BYTE*>(locked.Scan0) + y * locked.Stride, width * 4u);
 		}
-		source.UnlockBits(&locked);
+		source->UnlockBits(&locked);
 		return dib;
 	}
 
-	static HICON loadPngAsIcon(const fs::path& file) {
-		if (!ensureGdiplus()) {
-			return nullptr;
-		}
-
-		Gdiplus::Bitmap source(file.c_str());
-		if (source.GetLastStatus() != Gdiplus::Ok) {
-			return nullptr;
-		}
-
+	static HICON loadPngAsIcon(const std::string& resource) {
+		ResourceImage image(resource);
+		const auto source = image.get();
+		if (!source) { return nullptr; }
 		HICON icon = nullptr;
-		if (source.GetHICON(&icon) != Gdiplus::Ok) {
-			return nullptr;
-		}
-		return icon;
+		return source->GetHICON(&icon) == Gdiplus::Ok ? icon : nullptr;
 	}
 
 	// Returns a 32bpp copy of a bitmap with an opaque alpha channel, for use
@@ -235,60 +224,32 @@ namespace se::cs::iconoverride {
 
 	HBITMAP loadBitmapOverride(HINSTANCE hInstance, UINT resourceId, bool& outHasAlpha) {
 		outHasAlpha = false;
-
-		const auto file = findOverrideFile(hInstance, resourceId, Kind::bitmap);
-		if (!file) {
-			return nullptr;
-		}
-
-		HBITMAP bitmap;
-		if (file->extension() == L".png") {
-			bitmap = loadPngAsDib(*file);
-			outHasAlpha = bitmap != nullptr;
-		}
-		else {
-			bitmap = reinterpret_cast<HBITMAP>(LoadImageW(nullptr, file->c_str(), IMAGE_BITMAP, 0, 0, LR_LOADFROMFILE | LR_CREATEDIBSECTION));
-		}
-
-		logResult(*file, bitmap != nullptr);
+		const auto resource = findEmbeddedResource(hInstance, resourceId, Kind::bitmap);
+		if (resource.empty()) { return nullptr; }
+		const auto bitmap = loadPngAsDib(resource);
+		outHasAlpha = bitmap != nullptr;
+		logResult(resource, outHasAlpha);
 		return bitmap;
 	}
 
 	bool hasDataFilesCheckOverrides() {
 		const auto exe = GetModuleHandleA(nullptr);
-		for (UINT id = 133; id <= 137; ++id) {
-			if (findOverrideFile(exe, id, Kind::icon)) {
-				return true;
-			}
-		}
-		return false;
+		return !findEmbeddedResource(exe, 133, Kind::icon).empty() && !findEmbeddedResource(exe, 134, Kind::icon).empty();
 	}
 
 	//
-	// Import hooks. Resource ids only reach the override lookup for the CS exe
+	// Import hooks. Resource ids only reach the embedded lookup for the CS exe
 	// instance (and CSSE's toolbar strip); everything else passes through.
 	//
 
 	static HICON WINAPI hookLoadIconA(HINSTANCE hInstance, LPCSTR lpIconName) {
 		if (IS_INTRESOURCE(lpIconName)) {
 			const auto id = static_cast<UINT>(reinterpret_cast<ULONG_PTR>(lpIconName));
-			if (const auto file = findOverrideFile(hInstance, id, Kind::icon)) {
-				HICON icon;
-				if (file->extension() == L".png") {
-					icon = loadPngAsIcon(*file);
-				}
-				else {
-					icon = reinterpret_cast<HICON>(LoadImageW(nullptr, file->c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE));
-				}
-
-				logResult(*file, icon != nullptr);
-				if (icon) {
-					// Unlike LoadIconA's shared icons this is caller-owned, but
-					// every CS caller either keeps it for the process lifetime
-					// (window class icons) or destroys it after copying it into
-					// an image list (Data Files check marks).
-					return icon;
-				}
+			const auto resource = findEmbeddedResource(hInstance, id, Kind::icon);
+			if (!resource.empty()) {
+				const auto icon = loadPngAsIcon(resource);
+				logResult(resource, icon != nullptr);
+				if (icon) { return icon; }
 			}
 		}
 		return realLoadIconA(hInstance, lpIconName);
@@ -352,17 +313,7 @@ namespace se::cs::iconoverride {
 	}
 
 	void initialize() {
-		// Dark-only by design: light mode stays byte-identical to vanilla.
-		if (!darkmode::isActive()) {
-			return;
-		}
-
-		overrideDirectory = path::getDataFilesPath() / "CSSE" / "icons" / "dark";
-		std::error_code ec;
-		overridesAvailable = fs::is_directory(overrideDirectory, ec);
-		if (overridesAvailable) {
-			log::stream << "Icon overrides: loading from " << overrideDirectory.string() << "." << std::endl;
-		}
+		log::stream << "Icons: using embedded " << (darkmode::isActive() ? "dark" : "light") << " resources." << std::endl;
 
 		hookImportSlot(0x6D9DA0, realLoadIconA, hookLoadIconA);
 		hookImportSlot(0x6D9E38, realLoadImageA, hookLoadImageA);

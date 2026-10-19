@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <Target Name="ValidateCSSEConfiguration" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(Configuration)' != 'Release'" Text="This standalone CSSE project supports Release builds only." />
     <Error Condition="'$(Platform)' != 'Win32'" Text="CSSE supports only Win32 (x86). Build CSSE.sln with /p:Platform=x86, or CSSE.vcxproj with /p:Platform=Win32." />
     <Error Condition="!Exists('$(VCToolsInstallDir)atlmfc\include\afxwin.h')" Text="Install the C++ MFC for latest build tools (x86 and x64) component for the selected MSVC toolset." />
     <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(CSSEBuildNumber)', '^\d+$'))" Text="CSSEBuildNumber must contain decimal digits only." />

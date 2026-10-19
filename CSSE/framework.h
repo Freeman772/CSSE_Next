@@ -45,6 +45,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <future>
 #include <iomanip>
 #include <ios>
@@ -52,6 +53,7 @@
 #include <istream>
 #include <list>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <numeric>
 #include <optional>
@@ -82,6 +84,7 @@
 // Required Windows APIs.
 #include <windows.h>
 #include <windowsx.h>
+#include <objbase.h>
 #include <wtypes.h>
 #include <mmsystem.h>
 #include <psapi.h>
